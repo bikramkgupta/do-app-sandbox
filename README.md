@@ -1,6 +1,6 @@
 # DO App Sandbox
 
-> **Experimental**: This is an experimental project. APIs may change without notice.
+> **Experimental**: This is a personal project and is not officially supported by DigitalOcean. APIs may change without notice.
 
 A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platform, similar to Cloudflare Sandbox.
 
@@ -56,9 +56,10 @@ uv run python -m do_app_sandbox list
 
 ### Prerequisites
 
-1. **doctl CLI**: Must be installed and authenticated (`doctl auth init`)
-2. *(Optional)* **`DIGITALOCEAN_TOKEN`**: Only needed if not using doctl auth
-3. *(Optional)* **Spaces**: For large file transfers (`SPACES_ACCESS_KEY`, `SPACES_SECRET_KEY`, `SPACES_BUCKET`, `SPACES_REGION`)
+1. **Python 3.10.12+**: Required for secure tarfile extraction
+2. **doctl CLI**: Must be installed and authenticated (`doctl auth init`)
+3. *(Optional)* **`DIGITALOCEAN_TOKEN`**: Only needed if not using doctl auth
+4. *(Optional)* **Spaces**: For large file transfers (`SPACES_ACCESS_KEY`, `SPACES_SECRET_KEY`, `SPACES_BUCKET`, `SPACES_REGION`)
 
 **doctl is required** for all sandbox operations (create, exec, files, etc.). There is no API-only path; `DIGITALOCEAN_TOKEN` is only used to feed doctl auth if you prefer environment-based auth.
 
