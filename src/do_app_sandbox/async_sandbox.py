@@ -149,6 +149,58 @@ class AsyncFileSystem:
             cleanup,
         )
 
+    async def upload_folder(
+        self,
+        local_path: str,
+        remote_path: str,
+        exclude_patterns: list[str] | None = None,
+    ) -> None:
+        """Upload a local folder to the sandbox using tar asynchronously.
+
+        Uses tar to stream the folder contents, which works on all POSIX containers
+        (no Python dependency on remote).
+
+        Args:
+            local_path: Path to local folder
+            remote_path: Destination path on sandbox
+            exclude_patterns: Optional list of patterns to exclude (e.g., ["*.pyc", "__pycache__"])
+
+        Raises:
+            FileOperationError: If the transfer fails
+        """
+        await asyncio.to_thread(
+            self._sync_sandbox.filesystem.upload_folder,
+            local_path,
+            remote_path,
+            exclude_patterns,
+        )
+
+    async def download_folder(
+        self,
+        remote_path: str,
+        local_path: str,
+        exclude_patterns: list[str] | None = None,
+    ) -> None:
+        """Download a folder from the sandbox using tar asynchronously.
+
+        Uses tar to stream the folder contents, which works on all POSIX containers
+        (no Python dependency on remote).
+
+        Args:
+            remote_path: Path to folder on sandbox
+            local_path: Destination path locally
+            exclude_patterns: Optional list of patterns to exclude (e.g., ["*.log", "node_modules"])
+
+        Raises:
+            FileOperationError: If the transfer fails
+        """
+        await asyncio.to_thread(
+            self._sync_sandbox.filesystem.download_folder,
+            remote_path,
+            local_path,
+            exclude_patterns,
+        )
+
     @property
     def has_spaces(self) -> bool:
         """Check if Spaces is configured for large file transfers."""
