@@ -2,7 +2,25 @@
 name = "do-app-sandbox"
 version = "0.1.0"
 description = "Experimental sandbox API for DigitalOcean App Platform - provides sandbox-like capabilities similar to Cloudflare Sandbox"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [
+    {name = "Bikram Gupta", email = "bikram.gupta@gmail.com"}
+]
+keywords = ["digitalocean", "sandbox", "app-platform", "containers", "cloud"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "pexpect>=4.9.0",
 ]
@@ -10,12 +28,11 @@ dependencies = [
 [project.scripts]
 sandbox = "do_app_sandbox.cli:main"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/do_app_sandbox"]
+[project.urls]
+Homepage = "https://github.com/bikramkgupta/do-app-sandbox"
+Documentation = "https://github.com/bikramkgupta/do-app-sandbox#readme"
+Repository = "https://github.com/bikramkgupta/do-app-sandbox"
+Issues = "https://github.com/bikramkgupta/do-app-sandbox/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -27,3 +44,26 @@ spaces = [
 all = [
     "boto3>=1.34.0",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.github",
+    "/tests",
+    "/images",
+    "/scripts",
+    "/docs",
+    "/.env*",
+    "/Agent.md",
+    "/Claude.md",
+    "/App_Platform_Commands.md",
+    "/*.txt",
+    "/.gitignore",
+    "/uv.lock",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/do_app_sandbox"]
