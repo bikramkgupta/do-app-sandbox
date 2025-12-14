@@ -6,6 +6,7 @@ The DO App Sandbox SDK can connect to **any** running App Platform app—not jus
 
 - **doctl** installed and authenticated (`doctl auth init`)
 - An existing App Platform app that is running
+- **Shell prompt compatibility** - The container's shell prompt must end with `$ ` (regular user) or `# ` (root), following the standard format `user@hostname:path$ `. Most Linux containers with bash/sh meet this requirement.
 
 ## Step 1: Find the Component Name
 
