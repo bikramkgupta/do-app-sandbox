@@ -1,0 +1,65 @@
+# Python 3.12 Sandbox Image for App Platform Sandbox SDK
+# Optimized image with single Python version, no build dependencies
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install minimal base dependencies (no build-essential, no apt python)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    git \
+    unzip \
+    jq \
+    procps \
+    netcat-openbsd \
+    wget \
+    sudo \
+    lsof \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (fast Python installer and package manager)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH=/root/.local/bin:$PATH
+
+# Install Python 3.12
+RUN uv python install 3.12
+
+# Create sandbox user with sudo access
+RUN useradd -ms /bin/bash sandbox \
+    && echo "sandbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Copy uv and Python installation to sandbox user
+RUN cp -r /root/.local /home/sandbox/.local \
+    && chown -R sandbox:sandbox /home/sandbox/.local
+
+# Switch to sandbox user
+USER sandbox
+WORKDIR /home/sandbox
+
+# Add local bin to PATH
+ENV PATH=/home/sandbox/.local/bin:$PATH
+
+# Create symlinks for python/python3 (must be done after copying to sandbox user)
+RUN PYTHON_PATH=$(uv python find 3.12) \
+    && PYTHON_BIN_DIR=$(dirname "$PYTHON_PATH") \
+    && ln -sf "$PYTHON_PATH" /home/sandbox/.local/bin/python3 \
+    && ln -sf "$PYTHON_PATH" /home/sandbox/.local/bin/python \
+    && ln -sf "$PYTHON_BIN_DIR/pip3" /home/sandbox/.local/bin/pip3 2>/dev/null || true \
+    && ln -sf "$PYTHON_BIN_DIR/pip" /home/sandbox/.local/bin/pip 2>/dev/null || true \
+    && echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+
+# Create app directory
+RUN mkdir -p /home/sandbox/app
+WORKDIR /home/sandbox/app
+
+# Copy entrypoint script
+COPY --chown=sandbox:sandbox entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose the health check port
+EXPOSE 8080
+
+# Run entrypoint
+CMD ["/entrypoint.sh"]
