@@ -422,4 +422,4 @@ except SandboxNotReadyError:
 
 - [Run Commands](sandbox_runcommands.md) - Execute commands with environment variables and timeouts
 - [File Operations](sandbox_fileops.md) - Upload, download, and manage files
-- [Large File Transfers](sandbox_large_files.md) - Handle files larger than 5MB using Spaces
+- [Large File Transfers](sandbox_large_files.md) - Handle files larger than ~250KB using Spaces

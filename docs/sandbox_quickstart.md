@@ -285,4 +285,4 @@ export APP_SANDBOX_REGISTRY="my-registry"
 - [Sandbox Lifecycle](sandbox_lifecycle.md) - Learn about creating, discovering, and managing sandboxes
 - [Run Commands](sandbox_runcommands.md) - Advanced command execution with environment variables and timeouts
 - [File Operations](sandbox_fileops.md) - Upload, download, and manage files in your sandbox
-- [Large File Transfers](sandbox_large_files.md) - Handle files larger than 5MB using Spaces
+- [Large File Transfers](sandbox_large_files.md) - Handle files larger than ~250KB using Spaces

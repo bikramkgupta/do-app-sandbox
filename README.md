@@ -243,7 +243,7 @@ class CommandResult:
 
 ## Large Files (Spaces)
 
-Set `SPACES_ACCESS_KEY`, `SPACES_SECRET_KEY`, `SPACES_BUCKET`, and `SPACES_REGION` to enable Spaces-backed transfers. The SDK will automatically use Spaces for files larger than 5MB via `filesystem.upload_large` / `download_large`.
+Set `SPACES_ACCESS_KEY`, `SPACES_SECRET_KEY`, `SPACES_BUCKET`, and `SPACES_REGION` to enable Spaces-backed transfers. The SDK will automatically use Spaces for files larger than ~250KB (configurable via `SANDBOX_LARGE_FILE_THRESHOLD`) via `filesystem.upload_large` / `download_large`.
 
 ```python
 sandbox = Sandbox.create(image="python", spaces_config={"bucket": "my-bucket", "region": "nyc3"})
@@ -251,7 +251,7 @@ sandbox.filesystem.upload_large("./big.zip", "/tmp/big.zip")
 sandbox.filesystem.download_large("/tmp/output.zip", "./output.zip")
 ```
 
-**How it works**: Uses time-limited presigned URLs (15 min expiry) so no credentials are needed in the container. Files are transferred via curl and Spaces objects are deleted after transfer by default.
+**How it works**: Uses time-limited presigned URLs (15 min expiry by default) so no credentials are needed in the container. Files are transferred via curl and Spaces objects are deleted after transfer by default.
 
 ## Efficient File Transfers
 

@@ -21,8 +21,10 @@ if TYPE_CHECKING:
 class FileSystem:
     """File system operations for a sandbox container."""
 
-    # Default large file threshold (5 MB)
-    DEFAULT_LARGE_FILE_THRESHOLD = 5 * 1024 * 1024
+    # Default large file threshold (250 KB) before switching to Spaces
+    DEFAULT_LARGE_FILE_THRESHOLD = 250 * 1024
+    # Chunk size for console-based transfers to avoid oversized commands
+    CONSOLE_CHUNK_SIZE = 32 * 1024
 
     @staticmethod
     def _error_detail(result) -> str:
@@ -96,17 +98,9 @@ class FileSystem:
         Raises:
             FileOperationError: If the file cannot be written
         """
-        # Always use base64 encoding to avoid shell escaping issues
-        # (special chars like $, `, !, %, newlines, etc.)
         if isinstance(content, str):
             content = content.encode("utf-8")
-        b64_content = base64.b64encode(content).decode("ascii")
-        result = self._executor.execute(
-            f"echo {shlex.quote(b64_content)} | base64 -d > {shlex.quote(path)}"
-        )
-
-        if not result.success:
-            raise FileOperationError(f"Failed to write file {path}: {self._error_detail(result)}")
+        self._write_chunks(path, content, truncate=True)
 
     def append_file(self, path: str, content: str | bytes) -> None:
         """Append content to a file on the sandbox.
@@ -118,15 +112,9 @@ class FileSystem:
         Raises:
             FileOperationError: If the file cannot be written
         """
-        # Always use base64 encoding to avoid shell escaping issues
         if isinstance(content, str):
             content = content.encode("utf-8")
-        b64_content = base64.b64encode(content).decode("ascii")
-        result = self._executor.execute(
-            f"echo {shlex.quote(b64_content)} | base64 -d >> {shlex.quote(path)}"
-        )
-        if not result.success:
-            raise FileOperationError(f"Failed to append to file {path}: {self._error_detail(result)}")
+        self._write_chunks(path, content, truncate=False)
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         """Upload a local file to the sandbox.
@@ -376,6 +364,38 @@ class FileSystem:
                 pass
         return self.DEFAULT_LARGE_FILE_THRESHOLD
 
+    def _write_chunks(self, path: str, content: bytes, truncate: bool) -> None:
+        """Write content to a file in safe console-sized chunks.
+
+        Args:
+            path: Remote path
+            content: Bytes to write
+            truncate: Whether to remove the file before writing
+
+        Raises:
+            FileOperationError: If any chunk fails
+        """
+        if truncate:
+            # Ensure a clean file before chunked writes
+            self._executor.execute(f"rm -f {shlex.quote(path)}")
+
+        chunk_size = self.CONSOLE_CHUNK_SIZE
+        for offset in range(0, len(content), chunk_size):
+            chunk = content[offset : offset + chunk_size]
+            b64 = base64.b64encode(chunk).decode("ascii")
+            cmd = (
+                "python -c "
+                f"\"import base64, pathlib; "
+                f"p = pathlib.Path({path!r}); "
+                "p.parent.mkdir(parents=True, exist_ok=True); "
+                f"p.open('ab').write(base64.b64decode({b64!r}))\""
+            )
+            result = self._executor.execute(cmd, timeout=180)
+            if not result.success:
+                raise FileOperationError(
+                    f"Failed to write to {path}: {self._error_detail(result)}"
+                )
+
     def _require_spaces(self) -> None:
         """Verify Spaces is configured.
 
@@ -398,9 +418,9 @@ class FileSystem:
     ) -> None:
         """Upload a large file to the sandbox via DO Spaces.
 
-        For files >= 5MB, this uses Spaces as an intermediary:
+        For files above the configured threshold (default ~250KB), this uses Spaces as an intermediary:
         1. Uploads file from client to Spaces (authenticated via boto3)
-        2. Generates a time-limited presigned URL (15 min default)
+        2. Generates a time-limited presigned URL (default 5 min)
         3. Sandbox downloads using curl with the presigned URL
         4. Deletes Spaces object after transfer (default: True)
 
@@ -432,6 +452,7 @@ class FileSystem:
         filename = local.name
         key = self._spaces_client.generate_key(self._sandbox_id, filename, "upload")
 
+        transfer_success = False
         try:
             # Step 1: Upload to Spaces (authenticated via boto3)
             self._spaces_client.upload_file(local_path, key, progress_callback)
@@ -448,8 +469,9 @@ class FileSystem:
             # Combine curl + stat in same command to avoid race condition between
             # separate executor connections (file may not be visible in new connection
             # immediately after download completes)
+            curl_retry_flags = "--retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 120"
             result = self._executor.execute(
-                f"curl -sSfL -o {shlex.quote(remote_path)} {shlex.quote(presigned_url)} && "
+                f"curl -sSfL {curl_retry_flags} -o {shlex.quote(remote_path)} {shlex.quote(presigned_url)} && "
                 f"stat {shlex.quote(remote_path)} >/dev/null 2>&1",
                 timeout=600,  # 10 minute timeout for large downloads
             )
@@ -458,10 +480,11 @@ class FileSystem:
                 raise FileOperationError(
                     f"Failed to download file to sandbox: {self._error_detail(result)}"
                 )
+            transfer_success = True
 
         finally:
-            # Step 4: Cleanup (default: True for presigned URL approach)
-            if cleanup:
+            # Step 4: Cleanup (default: True for presigned URL approach) only on success
+            if cleanup and transfer_success:
                 try:
                     self._spaces_client.delete_object(key)
                 except Exception:
@@ -476,8 +499,8 @@ class FileSystem:
     ) -> None:
         """Download a large file from the sandbox via DO Spaces.
 
-        For files >= 5MB, this uses Spaces as an intermediary:
-        1. Generates a time-limited presigned upload URL (15 min default)
+        For files above the configured threshold (default ~250KB), this uses Spaces as an intermediary:
+        1. Generates a time-limited presigned upload URL (default 5 min)
         2. Sandbox uploads using curl with the presigned URL
         3. Client downloads from Spaces (authenticated via boto3)
         4. Deletes Spaces object after transfer (default: True)
@@ -507,13 +530,15 @@ class FileSystem:
         filename = os.path.basename(remote_path)
         key = self._spaces_client.generate_key(self._sandbox_id, filename, "download")
 
+        transfer_success = False
         try:
             # Step 1: Generate presigned upload URL (15 min expiry)
             presigned_url = self._spaces_client.generate_presigned_upload_url(key)
 
             # Step 2: Upload from sandbox to Spaces using curl with presigned URL
+            curl_retry_flags = "--retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 120"
             result = self._executor.execute(
-                f"curl -sSfL -X PUT -T {shlex.quote(remote_path)} {shlex.quote(presigned_url)}",
+                f"curl -sSfL {curl_retry_flags} -X PUT -T {shlex.quote(remote_path)} {shlex.quote(presigned_url)}",
                 timeout=600,  # 10 minute timeout for large uploads
             )
 
@@ -532,10 +557,11 @@ class FileSystem:
             local = Path(local_path)
             local.parent.mkdir(parents=True, exist_ok=True)
             self._spaces_client.download_file(key, local_path, progress_callback)
+            transfer_success = True
 
         finally:
-            # Step 4: Cleanup (default: True for presigned URL approach)
-            if cleanup:
+            # Step 4: Cleanup (default: True for presigned URL approach) only on success
+            if cleanup and transfer_success:
                 try:
                     self._spaces_client.delete_object(key)
                 except Exception:

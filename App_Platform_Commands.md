@@ -36,37 +36,31 @@ doctl apps logs <app_id> <component_name> --type deploy
 
 ### Execute commands in running containers
 
-For direct access to a running container's shell, use the remote exec tool:
+For direct access to a running container's shell, use the do-app-sandbox CLI:
 
 ```bash
-# Using the doctl_remote_exec Python utility
-cd doctl_remote_exec
+# Install (one-time)
+pip install do-app-sandbox
 
-# With uv
-uv run python doctl_remote_exec.py <app-id> <component-name> "<command>"
-
-# With virtualenv (first time setup)
-python -m venv venv
-source venv/bin/activate
-pip install pexpect>=4.9.0
-
-# Run command
-python doctl_remote_exec.py <app-id> <component-name> "<command>"
+# Execute commands
+sandbox exec <app-id> "<command>"
 
 # Examples
-python doctl_remote_exec.py abc123... dev-workspace "ls -la /workspaces/app"
-python doctl_remote_exec.py abc123... dev-workspace "cat /workspaces/app/package.json"
-python doctl_remote_exec.py abc123... dev-workspace "ps aux | grep node"
+sandbox exec abc123def456 "ls -la /workspaces/app"
+sandbox exec abc123def456 "cat /workspaces/app/package.json"
+sandbox exec abc123def456 "ps aux | grep node"
+sandbox exec abc123def456 "cd /workspaces/app && git log -1"
+sandbox exec abc123def456 "env | grep GITHUB"
 ```
 
 **Use cases:**
 - Inspect running processes
 - Check file system state
-- Verify environment variables: `env | grep GITHUB`
-- Debug git sync: `cd /workspaces/app && git log -1`
+- Verify environment variables
+- Debug git sync
 - Check disk usage: `df -h`
 
-**Note:** Requires Python 3.14+ and pexpect library. See `doctl_remote_exec/README.md` for details.
+**See:** https://github.com/bikramkgupta/do-app-sandbox
 
 ### Create new app
 ```
