@@ -1,0 +1,89 @@
+name: Build and Push Sandbox Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "images/python/**"
+      - "images/node/**"
+      - ".github/workflows/build-images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: ${{ github.repository_owner }}
+
+jobs:
+  build-python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            tag: latest
+          - dockerfile: Dockerfile.python3.12
+            tag: python3.12
+          - dockerfile: Dockerfile.python3.13
+            tag: python3.13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push python image
+        uses: docker/build-push-action@v5
+        with:
+          context: images/python
+          file: images/python/${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER }}/sandbox-python:${{ matrix.tag }}
+          provenance: false
+
+  build-node:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            tag: latest
+          - dockerfile: Dockerfile.node22
+            tag: node22
+          - dockerfile: Dockerfile.node24
+            tag: node24
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push node image
+        uses: docker/build-push-action@v5
+        with:
+          context: images/node
+          file: images/node/${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER }}/sandbox-node:${{ matrix.tag }}
+          provenance: false
