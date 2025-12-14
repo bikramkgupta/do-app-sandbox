@@ -1,0 +1,68 @@
+# Node.js 24 Sandbox Image for App Platform Sandbox SDK
+# Optimized image with single Node version, no build dependencies
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install minimal base dependencies (no build-essential)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    git \
+    unzip \
+    jq \
+    procps \
+    netcat-openbsd \
+    wget \
+    sudo \
+    lsof \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 24 via nvm
+ENV NVM_DIR=/root/.nvm
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash \
+    && . "$NVM_DIR/nvm.sh" \
+    && nvm install 24 \
+    && nvm alias default 24
+
+# Create sandbox user with sudo access
+RUN useradd -ms /bin/bash sandbox \
+    && echo "sandbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Copy nvm to sandbox user
+RUN cp -r /root/.nvm /home/sandbox/.nvm \
+    && mkdir -p /home/sandbox/.local/bin \
+    && chown -R sandbox:sandbox /home/sandbox/.nvm /home/sandbox/.local
+
+# Switch to sandbox user
+USER sandbox
+WORKDIR /home/sandbox
+
+# Add local bin to PATH and setup nvm
+ENV PATH=/home/sandbox/.local/bin:$PATH
+ENV NVM_DIR=/home/sandbox/.nvm
+
+# Create symlinks for node/npm/npx (must be done after copying to sandbox user)
+RUN . "$NVM_DIR/nvm.sh" \
+    && NODE_BIN_DIR="$NVM_DIR/versions/node/$(node --version)/bin" \
+    && ln -sf "$NODE_BIN_DIR/node" /home/sandbox/.local/bin/node \
+    && ln -sf "$NODE_BIN_DIR/npm" /home/sandbox/.local/bin/npm \
+    && ln -sf "$NODE_BIN_DIR/npx" /home/sandbox/.local/bin/npx \
+    && echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc \
+    && echo 'export NVM_DIR="$HOME/.nvm"' >> ~/.bashrc \
+    && echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> ~/.bashrc
+
+# Create app directory
+RUN mkdir -p /home/sandbox/app
+WORKDIR /home/sandbox/app
+
+# Copy entrypoint script
+COPY --chown=sandbox:sandbox entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose the health check port
+EXPOSE 8080
+
+# Run entrypoint
+CMD ["/entrypoint.sh"]

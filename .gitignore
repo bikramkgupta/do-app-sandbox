@@ -1,0 +1,38 @@
+# Environment and secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+tests/artifacts/*.log
+tests/artifacts/*.log.*
+tests/artifacts/*.txt
+tests/artifacts/*.json
+!tests/artifacts/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+sandbox_*_info.txt

@@ -1,0 +1,38 @@
+# App Platform Sandbox Spec Template - SERVICE
+# This template is used by Sandbox.create() to deploy sandbox containers as services.
+# Services expose an HTTP endpoint on port 8080.
+#
+# Note: The actual templates used by the SDK are in deployer.py
+# This file is for reference/documentation only.
+#
+# Variables:
+#   {sandbox_name} - Name of the sandbox application
+#   {registry_type} - Registry type: "GHCR" (GitHub) or "DOCR" (DigitalOcean)
+#   {registry} - Registry name (e.g., "bikramkgupta" for GHCR)
+#   {repository} - Image repository name (e.g., sandbox-python, sandbox-node)
+#   {tag} - Image tag (e.g., latest, 3.13)
+#   {region} - App Platform region (default: atl1)
+#   {instance_size} - Instance size slug (default: apps-s-1vcpu-1gb)
+
+name: {sandbox_name}
+region: {region}
+services:
+  - name: sandbox
+    image:
+      registry_type: {registry_type}
+      registry: {registry}
+      repository: {repository}
+      tag: {tag}
+    instance_count: 1
+    instance_size_slug: {instance_size}
+    http_port: 8080
+    internal_ports:
+      - 9090
+    health_check:
+      http_path: /sandbox_health
+      port: 9090
+      initial_delay_seconds: 10
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3

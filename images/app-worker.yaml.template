@@ -1,0 +1,27 @@
+# App Platform Sandbox Spec Template - WORKER
+# This template is used by Sandbox.create(component_type="worker") to deploy
+# sandbox containers as workers. Workers have no HTTP endpoint.
+#
+# Note: The actual templates used by the SDK are in deployer.py
+# This file is for reference/documentation only.
+#
+# Variables:
+#   {sandbox_name} - Name of the sandbox application
+#   {registry_type} - Registry type: "GHCR" (GitHub) or "DOCR" (DigitalOcean)
+#   {registry} - Registry name (e.g., "bikramkgupta" for GHCR)
+#   {repository} - Image repository name (e.g., sandbox-python, sandbox-node)
+#   {tag} - Image tag (e.g., latest, 3.13)
+#   {region} - App Platform region (default: atl1)
+#   {instance_size} - Instance size slug (default: apps-s-1vcpu-1gb)
+
+name: {sandbox_name}
+region: {region}
+workers:
+  - name: sandbox
+    image:
+      registry_type: {registry_type}
+      registry: {registry}
+      repository: {repository}
+      tag: {tag}
+    instance_count: 1
+    instance_size_slug: {instance_size}
