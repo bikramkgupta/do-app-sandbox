@@ -615,24 +615,39 @@ class FileSystem:
         if not local.is_dir():
             raise FileOperationError(f"Local path is not a directory: {local_path}")
 
-        # Create tar archive in memory
+        # Create tar archive in memory (non-recursive adds to avoid duplicate entries)
         import io
         import tarfile
 
+        def _is_excluded(rel_path: Path) -> bool:
+            if not exclude_patterns:
+                return False
+            return any(rel_path.match(pattern) for pattern in exclude_patterns)
+
         tar_buffer = io.BytesIO()
         with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
-            for item in local.rglob("*"):
-                rel_path = item.relative_to(local)
-                # Check exclude patterns
-                if exclude_patterns:
-                    skip = False
-                    for pattern in exclude_patterns:
-                        if rel_path.match(pattern):
-                            skip = True
-                            break
-                    if skip:
+            for root, dirs, files in os.walk(local):
+                root_path = Path(root)
+                rel_root = root_path.relative_to(local)
+
+                # Skip entire subtree if the directory is excluded
+                if rel_root != Path(".") and _is_excluded(rel_root):
+                    dirs[:] = []
+                    continue
+
+                # Add the directory entry itself (non-recursive) if not root
+                if rel_root != Path("."):
+                    tar.add(root_path, arcname=str(rel_root), recursive=False)
+
+                # Filter dirs in-place to avoid descending into excluded dirs
+                dirs[:] = [d for d in dirs if not _is_excluded(rel_root / d)]
+
+                # Add files
+                for fname in files:
+                    rel_file = rel_root / fname
+                    if _is_excluded(rel_file):
                         continue
-                tar.add(item, arcname=str(rel_path))
+                    tar.add(root_path / fname, arcname=str(rel_file), recursive=False)
 
         tar_data = tar_buffer.getvalue()
         if not tar_data:
