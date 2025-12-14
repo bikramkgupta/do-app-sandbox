@@ -1,13 +1,13 @@
 # Large File Transfers with Spaces
 
-Transfer files larger than 5MB efficiently using DigitalOcean Spaces as an intermediary. This architecture enables secure, fast transfers without exposing credentials to the sandbox.
+Transfer files larger than ~250KB efficiently using DigitalOcean Spaces as an intermediary. This architecture enables secure, fast transfers without exposing credentials to the sandbox. The threshold is configurable via `SANDBOX_LARGE_FILE_THRESHOLD`.
 
 ## Why Spaces Integration?
 
-The standard file transfer methods use base64 encoding through the console connection, which works well for small files but becomes slow and unreliable for larger files. For files 5MB or larger, we use DigitalOcean Spaces (S3-compatible object storage) as an intermediary:
+The standard file transfer methods use base64 encoding through the console connection, which works well for small files but becomes slow and unreliable for larger files. For files ~250KB or larger (default; configurable), we use DigitalOcean Spaces (S3-compatible object storage) as an intermediary:
 
 - **Fast**: Direct HTTP transfers instead of console encoding
-- **Secure**: Presigned URLs expire after 15 minutes
+- **Secure**: Presigned URLs expire after 15 minutes (default; configurable)
 - **Reliable**: Handles large files without timeout issues
 - **No credentials in sandbox**: The sandbox never sees your Spaces credentials
 
@@ -21,7 +21,7 @@ sequenceDiagram
     participant Spaces as DO Spaces
     participant Sandbox as App Platform Sandbox
 
-    Note over Client,Sandbox: Large File Upload Flow (≥5MB)
+    Note over Client,Sandbox: Large File Upload Flow (≥~250KB)
     Client->>Spaces: 1. Upload file (boto3)
     Spaces-->>Client: 2. Upload confirmed
     Client->>Spaces: 3. Generate presigned download URL (15min)
@@ -41,7 +41,7 @@ sequenceDiagram
     participant Spaces as DO Spaces
     participant Sandbox as App Platform Sandbox
 
-    Note over Client,Sandbox: Large File Download Flow (≥5MB)
+    Note over Client,Sandbox: Large File Download Flow (≥~250KB)
     Client->>Spaces: 1. Generate presigned upload URL (15min)
     Spaces-->>Client: 2. Return presigned URL
     Client->>Sandbox: 3. Send curl command with presigned URL
@@ -72,7 +72,7 @@ export SPACES_REGION="nyc3"  # or: sfo3, ams3, sgp1, fra1
 # Custom endpoint (if using a different Spaces region)
 export SPACES_ENDPOINT="https://nyc3.digitaloceanspaces.com"
 
-# Adjust the large file threshold (default: 5MB)
+# Adjust the large file threshold (default: ~250KB)
 export SANDBOX_LARGE_FILE_THRESHOLD="5242880"  # bytes
 ```
 
@@ -456,7 +456,7 @@ upload_file_smart(sandbox, "./model.bin", "/models/model.bin")
 
 ## Security Considerations
 
-1. **Presigned URLs expire**: URLs are valid for only 15 minutes
+1. **Presigned URLs expire**: URLs are short-lived (default 15 minutes; configurable)
 2. **No credentials in sandbox**: The sandbox only receives temporary URLs
 3. **Automatic cleanup**: Temporary objects are deleted after transfer
 4. **Bucket isolation**: Use a dedicated bucket for sandbox transfers

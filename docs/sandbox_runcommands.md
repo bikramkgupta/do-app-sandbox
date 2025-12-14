@@ -452,5 +452,5 @@ sandbox exec my-sandbox "echo 'Hello, World!' | wc -c"
 ## Next Steps
 
 - [File Operations](sandbox_fileops.md) - Upload, download, and manage files in your sandbox
-- [Large File Transfers](sandbox_large_files.md) - Handle files larger than 5MB using Spaces
+- [Large File Transfers](sandbox_large_files.md) - Handle files larger than ~250KB using Spaces
 - [Background Processes](sandbox_processes.md) - Run long-running processes in the background

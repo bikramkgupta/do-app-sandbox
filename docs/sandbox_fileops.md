@@ -392,9 +392,9 @@ sandbox.filesystem.move("/app/old_name.py", "/app/new_name.py")
 sandbox.filesystem.move("/tmp/results.csv", "/app/output/results.csv")
 ```
 
-## Large Files (5MB+)
+## Large Files (~250KB+)
 
-For files 5MB or larger, use Spaces integration for efficient transfers:
+For files around 250KB or larger (configurable via `SANDBOX_LARGE_FILE_THRESHOLD`), use Spaces integration for efficient transfers:
 
 ```python
 # Check if Spaces is configured
@@ -534,6 +534,6 @@ else:
 
 ## Next Steps
 
-- [Large File Transfers](sandbox_large_files.md) - Handle files 5MB+ using DigitalOcean Spaces
+- [Large File Transfers](sandbox_large_files.md) - Handle files ~250KB+ using DigitalOcean Spaces
 - [Background Processes](sandbox_processes.md) - Run long-running jobs in the background
 - [Run Commands](sandbox_runcommands.md) - Execute commands with the uploaded files
