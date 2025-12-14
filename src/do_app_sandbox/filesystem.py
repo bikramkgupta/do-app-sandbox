@@ -7,6 +7,7 @@ on the remote sandbox container.
 import base64
 import os
 import shlex
+import time
 from pathlib import Path
 from typing import Callable, Optional, TYPE_CHECKING
 
@@ -25,6 +26,9 @@ class FileSystem:
     DEFAULT_LARGE_FILE_THRESHOLD = 250 * 1024
     # Chunk size for console-based transfers to avoid oversized commands
     CONSOLE_CHUNK_SIZE = 32 * 1024
+    # Retry settings for console transfers
+    CONSOLE_MAX_RETRIES = 3
+    CONSOLE_RETRY_BASE_DELAY = 2  # seconds, doubles each retry
 
     @staticmethod
     def _error_detail(result) -> str:
@@ -367,33 +371,52 @@ class FileSystem:
     def _write_chunks(self, path: str, content: bytes, truncate: bool) -> None:
         """Write content to a file in safe console-sized chunks.
 
+        Uses shell-native base64 decode (no Python dependency) with retry logic.
+
         Args:
             path: Remote path
             content: Bytes to write
             truncate: Whether to remove the file before writing
 
         Raises:
-            FileOperationError: If any chunk fails
+            FileOperationError: If any chunk fails after retries
         """
+        quoted_path = shlex.quote(path)
+        parent_dir = os.path.dirname(path)
+
         if truncate:
             # Ensure a clean file before chunked writes
-            self._executor.execute(f"rm -f {shlex.quote(path)}")
+            self._executor.execute(f"rm -f {quoted_path}")
+
+        # Ensure parent directory exists (shell-native, no Python)
+        if parent_dir:
+            result = self._executor.execute(f"mkdir -p {shlex.quote(parent_dir)}")
+            if not result.success:
+                raise FileOperationError(
+                    f"Failed to create directory {parent_dir}: {self._error_detail(result)}"
+                )
 
         chunk_size = self.CONSOLE_CHUNK_SIZE
         for offset in range(0, len(content), chunk_size):
             chunk = content[offset : offset + chunk_size]
             b64 = base64.b64encode(chunk).decode("ascii")
-            cmd = (
-                "python -c "
-                f"\"import base64, pathlib; "
-                f"p = pathlib.Path({path!r}); "
-                "p.parent.mkdir(parents=True, exist_ok=True); "
-                f"p.open('ab').write(base64.b64decode({b64!r}))\""
-            )
-            result = self._executor.execute(cmd, timeout=180)
-            if not result.success:
+            # Use shell-native base64 decode - works on all POSIX containers
+            # printf is more portable than echo for binary-safe output
+            cmd = f"printf '%s' {shlex.quote(b64)} | base64 -d >> {quoted_path}"
+
+            last_error = None
+            for attempt in range(self.CONSOLE_MAX_RETRIES):
+                result = self._executor.execute(cmd, timeout=180)
+                if result.success:
+                    break
+                last_error = self._error_detail(result)
+                if attempt < self.CONSOLE_MAX_RETRIES - 1:
+                    # Exponential backoff: 2s, 4s, 8s...
+                    time.sleep(self.CONSOLE_RETRY_BASE_DELAY * (2 ** attempt))
+            else:
+                # All retries exhausted
                 raise FileOperationError(
-                    f"Failed to write to {path}: {self._error_detail(result)}"
+                    f"Failed to write to {path} after {self.CONSOLE_MAX_RETRIES} attempts: {last_error}"
                 )
 
     def _require_spaces(self) -> None:
@@ -566,6 +589,154 @@ class FileSystem:
                     self._spaces_client.delete_object(key)
                 except Exception:
                     pass  # Best effort cleanup
+
+    def upload_folder(
+        self,
+        local_path: str,
+        remote_path: str,
+        exclude_patterns: Optional[list[str]] = None,
+    ) -> None:
+        """Upload a local folder to the sandbox using tar (no Python dependency).
+
+        Uses tar to stream the folder contents, which works on all POSIX containers.
+        For large folders, consider using Spaces-based transfer instead.
+
+        Args:
+            local_path: Path to local folder
+            remote_path: Destination path on sandbox
+            exclude_patterns: Optional list of patterns to exclude (e.g., ["*.pyc", "__pycache__"])
+
+        Raises:
+            FileOperationError: If the transfer fails
+        """
+        local = Path(local_path)
+        if not local.exists():
+            raise FileOperationError(f"Local path not found: {local_path}")
+        if not local.is_dir():
+            raise FileOperationError(f"Local path is not a directory: {local_path}")
+
+        # Create tar archive in memory
+        import io
+        import tarfile
+
+        tar_buffer = io.BytesIO()
+        with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
+            for item in local.rglob("*"):
+                rel_path = item.relative_to(local)
+                # Check exclude patterns
+                if exclude_patterns:
+                    skip = False
+                    for pattern in exclude_patterns:
+                        if rel_path.match(pattern):
+                            skip = True
+                            break
+                    if skip:
+                        continue
+                tar.add(item, arcname=str(rel_path))
+
+        tar_data = tar_buffer.getvalue()
+        if not tar_data:
+            # Empty folder, just create the directory
+            self.mkdir(remote_path, recursive=True)
+            return
+
+        # Encode tar data as base64
+        b64_data = base64.b64encode(tar_data).decode("ascii")
+
+        # Create remote directory and extract tar (shell-native, no Python)
+        quoted_path = shlex.quote(remote_path)
+        self._executor.execute(f"mkdir -p {quoted_path}")
+
+        # For small archives, send inline; for large ones, use chunked transfer
+        if len(b64_data) < self.CONSOLE_CHUNK_SIZE:
+            cmd = f"printf '%s' {shlex.quote(b64_data)} | base64 -d | tar xzf - -C {quoted_path}"
+            result = self._executor.execute(cmd, timeout=300)
+            if not result.success:
+                raise FileOperationError(
+                    f"Failed to extract folder to {remote_path}: {self._error_detail(result)}"
+                )
+        else:
+            # Write tar to temp file, then extract
+            temp_tar = f"/tmp/upload_{os.urandom(8).hex()}.tar.gz"
+            try:
+                self._write_chunks(temp_tar, tar_data, truncate=True)
+                result = self._executor.execute(
+                    f"tar xzf {shlex.quote(temp_tar)} -C {quoted_path}",
+                    timeout=300,
+                )
+                if not result.success:
+                    raise FileOperationError(
+                        f"Failed to extract folder to {remote_path}: {self._error_detail(result)}"
+                    )
+            finally:
+                self._executor.execute(f"rm -f {shlex.quote(temp_tar)}")
+
+    def download_folder(
+        self,
+        remote_path: str,
+        local_path: str,
+        exclude_patterns: Optional[list[str]] = None,
+    ) -> None:
+        """Download a folder from the sandbox using tar (no Python dependency).
+
+        Uses tar to stream the folder contents, which works on all POSIX containers.
+        For large folders, consider using Spaces-based transfer instead.
+
+        Args:
+            remote_path: Path to folder on sandbox
+            local_path: Destination path locally
+            exclude_patterns: Optional list of patterns to exclude (e.g., ["*.log", "node_modules"])
+
+        Raises:
+            FileOperationError: If the transfer fails
+        """
+        # Verify remote path exists and is a directory
+        if not self.is_dir(remote_path):
+            raise FileOperationError(f"Remote path is not a directory: {remote_path}")
+
+        quoted_path = shlex.quote(remote_path)
+
+        # Build exclude args for tar
+        exclude_args = ""
+        if exclude_patterns:
+            for pattern in exclude_patterns:
+                exclude_args += f" --exclude={shlex.quote(pattern)}"
+
+        # Create tar on remote and encode as base64
+        cmd = f"tar czf - -C {quoted_path}{exclude_args} . | base64"
+
+        last_error = None
+        for attempt in range(self.CONSOLE_MAX_RETRIES):
+            result = self._executor.execute(cmd, timeout=600)
+            if result.success:
+                break
+            last_error = self._error_detail(result)
+            if attempt < self.CONSOLE_MAX_RETRIES - 1:
+                time.sleep(self.CONSOLE_RETRY_BASE_DELAY * (2 ** attempt))
+        else:
+            raise FileOperationError(
+                f"Failed to create tar archive from {remote_path} after {self.CONSOLE_MAX_RETRIES} attempts: {last_error}"
+            )
+
+        # Decode base64 and extract locally
+        try:
+            tar_data = base64.b64decode(result.stdout.replace("\n", ""))
+        except Exception as e:
+            raise FileOperationError(f"Failed to decode tar archive: {e}")
+
+        # Extract tar locally
+        import io
+        import tarfile
+
+        local = Path(local_path)
+        local.mkdir(parents=True, exist_ok=True)
+
+        tar_buffer = io.BytesIO(tar_data)
+        try:
+            with tarfile.open(fileobj=tar_buffer, mode="r:gz") as tar:
+                tar.extractall(path=local, filter="data")
+        except Exception as e:
+            raise FileOperationError(f"Failed to extract tar archive to {local_path}: {e}")
 
     @property
     def has_spaces(self) -> bool:
