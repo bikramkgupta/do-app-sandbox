@@ -2,6 +2,11 @@
 
 > **Experimental**: This is a personal project and is not officially supported by DigitalOcean. APIs may change without notice.
 
+This is part of 3 projects to scale Agentic workflows with DigitalOcean App Platform. The concepts are generic and should work with any PaaS:
+- Safe local sandboxing using DevContainers ([do-app-devcontainer](https://github.com/bikramkgupta/do-app-devcontainer))
+- Rapid development iteration using hot reload ([do-app-hot-reload-template](https://github.com/bikramkgupta/do-app-hot-reload-template))
+- Disposable environments using sandboxes for parallel experimentation and debugging (this repo or [do-app-sandbox](https://github.com/bikramkgupta/do-app-sandbox))
+
 A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platform, similar to Cloudflare Sandbox.
 
 ## Features
