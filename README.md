@@ -24,6 +24,120 @@ A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platfo
 - Reference tables for SDK and CLI parameters/outputs: `docs/sandbox_reference.md`
 - Troubleshooting existing App Platform apps: `docs/troubleshooting_existing_apps.md`
 
+## Two Ways to Use This Package
+
+This package has **two powerful capabilities** that work with any DigitalOcean App Platform app:
+
+| Capability | Method | Use Case |
+|------------|--------|----------|
+| **Create Sandboxes** | `Sandbox.create()` | Spin up new isolated containers for testing, experimentation, or running untrusted code |
+| **Troubleshoot Existing Apps** | `Sandbox.get_from_id()` | Connect to ANY running App Platform app for debugging, diagnostics, and file operations |
+
+### Create a New Sandbox
+
+```python
+from do_app_sandbox import Sandbox
+
+# Create an isolated sandbox environment
+sandbox = Sandbox.create(image="python", name="my-sandbox")
+
+# Run code, install packages, experiment freely
+sandbox.exec("pip install requests")
+result = sandbox.exec("python3 -c \"import requests; print('OK')\"")
+
+# Clean up when done
+sandbox.delete()
+```
+
+### Connect to an Existing App
+
+```python
+from do_app_sandbox import Sandbox
+
+# Connect to ANY existing App Platform app for troubleshooting
+app = Sandbox.get_from_id(
+    app_id="your-app-id",           # From DigitalOcean dashboard or doctl
+    component="your-component-name"  # Service or worker name (e.g., "web", "api")
+)
+
+# Run diagnostics
+app.exec("ps aux")                  # Check running processes
+app.exec("df -h")                   # Check disk usage
+app.exec("env")                     # Inspect environment variables
+
+# Read configuration files
+config = app.filesystem.read_file("/app/config.json")
+
+# Download logs for local analysis
+app.filesystem.download_file("/var/log/app.log", "./app.log")
+```
+
+## Troubleshoot Existing Apps
+
+The `Sandbox.get_from_id()` method connects to **any running App Platform app**—not just sandboxes you create. This is invaluable for debugging production issues, inspecting configuration, and downloading logs.
+
+### Finding Your App ID and Component Name
+
+```bash
+# List all your apps
+doctl apps list
+
+# Get component names for a specific app
+doctl apps get <APP_ID> --output json | jq '.spec.services[].name'
+doctl apps get <APP_ID> --output json | jq '.spec.workers[].name'
+```
+
+You can also find the App ID in the DigitalOcean dashboard URL:
+`https://cloud.digitalocean.com/apps/<APP_ID>`
+
+### Common Diagnostic Commands
+
+```python
+from do_app_sandbox import Sandbox
+
+app = Sandbox.get_from_id(app_id="ea1525eb-...", component="web")
+
+# System diagnostics
+app.exec("ps aux")              # Running processes
+app.exec("top -b -n 1")         # CPU/memory snapshot
+app.exec("df -h")               # Disk usage
+app.exec("free -m")             # Memory usage
+app.exec("netstat -tlnp")       # Open ports
+
+# Application diagnostics
+app.exec("env")                 # Environment variables
+app.exec("cat /proc/1/cmdline") # Main process command
+app.exec("ls -la /app")         # Application files
+
+# Log inspection
+app.exec("tail -100 /var/log/app.log")
+app.exec("grep ERROR /var/log/app.log | tail -20")
+```
+
+### File Operations for Debugging
+
+```python
+# Read configuration files
+config = app.filesystem.read_file("/app/config.json")
+env_file = app.filesystem.read_file("/app/.env")
+
+# List directory contents
+files = app.filesystem.list_dir("/app")
+for f in files:
+    print(f"  {f.name} ({f.type})")
+
+# Download logs for local analysis
+app.filesystem.download_file("/var/log/app.log", "./app.log")
+app.filesystem.download_file("/app/debug.log", "./debug.log")
+
+# Write temporary debug files (use cautiously on production)
+app.filesystem.write_file("/tmp/debug-flag.txt", "enabled")
+```
+
+> **Note**: Be careful when writing files to production apps. Use `/tmp/` for temporary debug files and clean up when done.
+
+For more details, see the [Troubleshooting Existing Apps Guide](docs/troubleshooting_existing_apps.md).
+
 ## Installation
 
 ### From PyPI (when published)
