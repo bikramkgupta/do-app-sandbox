@@ -82,12 +82,50 @@ class Executor:
             raise ConnectionError(f"Failed to connect to {self.component}: {e}")
 
     def _disconnect(self, child: pexpect.spawn) -> None:
-        """Close the console connection."""
+        """Close the console connection and ensure PTY file descriptors are released.
+
+        This method ensures proper cleanup of the pexpect child process and its
+        associated PTY file descriptors to prevent resource leaks in long-running
+        applications.
+        """
+        if child is None:
+            return
+
+        # Send exit command if process is still alive
         try:
-            child.sendline("exit")
-            child.close()
+            if child.isalive():
+                try:
+                    child.sendline("exit")
+                    # Wait for process to exit gracefully (with timeout)
+                    child.expect(pexpect.EOF, timeout=5)
+                except (pexpect.exceptions.TIMEOUT, pexpect.exceptions.EOF):
+                    pass  # Process may have already exited
         except Exception:
-            pass  # Best effort cleanup
+            pass
+
+        # Force terminate if still alive
+        try:
+            if child.isalive():
+                child.terminate(force=True)
+        except Exception:
+            pass
+
+        # Explicitly close the PTY file descriptor to prevent leaks
+        try:
+            if hasattr(child, "child_fd") and child.child_fd is not None:
+                try:
+                    os.close(child.child_fd)
+                except OSError:
+                    pass  # Already closed
+                child.child_fd = None
+        except Exception:
+            pass
+
+        # Finally, close the pexpect object with force flag
+        try:
+            child.close(force=True)
+        except Exception:
+            pass
 
     def _build_command(
         self,
