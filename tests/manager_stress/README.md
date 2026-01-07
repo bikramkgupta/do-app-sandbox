@@ -11,14 +11,62 @@ uv run python -m tests.manager_stress --list-scenarios
 # Run quick validation (10 min)
 uv run python -m tests.manager_stress --scenario quick_validation
 
+# Run 1-hour 40-sandbox test
+uv run python -m tests.manager_stress --scenario sandbox_40_1hr
+
 # Run 8-hour stress test (500 sandboxes)
 uv run python -m tests.manager_stress --scenario mega_stress_8hr
 
-# Dry run (mock sandboxes, no cost)
-uv run python -m tests.manager_stress --scenario mega_stress_8hr --dry-run
+# Dry run (algorithmic simulation, no real sandboxes, no cost)
+uv run python -m tests.manager_stress --scenario quick_validation --dry-run -v
 
 # Compare adaptive algorithms
 uv run python -m tests.manager_stress.algorithm_comparison
+```
+
+## Running Tests
+
+### Unit Tests (Fast, No Infrastructure)
+
+```bash
+# Run manager unit tests
+uv run pytest tests/test_manager.py -v
+
+# Run algorithmic simulator tests
+uv run pytest tests/manager_stress/test_algorithmic_simulator.py -v
+
+# Run all unit tests
+uv run pytest tests/test_manager.py tests/manager_stress/test_algorithmic_simulator.py -v
+```
+
+### Dry-Run Mode (Algorithmic Simulation)
+
+Dry-run mode uses an `AlgorithmicMockManager` that faithfully implements the same limit tracking logic as the real manager. This catches algorithmic bugs without real infrastructure.
+
+```bash
+# Quick dry-run (validates limit enforcement)
+uv run python -m tests.manager_stress --scenario quick_validation --dry-run -v
+
+# What dry-run tests:
+# - max_total_sandboxes limit enforcement
+# - ready + creating + in_use tracking
+# - Limit violation detection
+# - Pool replenishment logic
+```
+
+**Key difference from real tests**: Dry-run completes in seconds/minutes (no ~30s sandbox creation wait).
+
+### Real Sandbox Tests (Requires DIGITALOCEAN_TOKEN)
+
+```bash
+# Validate test programs exist
+uv run python -m tests.manager_stress --validate-programs
+
+# Run quick real test (10 min, ~$0.04)
+uv run python -m tests.manager_stress --scenario quick_validation -v
+
+# Run 40-sandbox 1-hour test (~$0.80)
+uv run python -m tests.manager_stress --scenario sandbox_40_1hr -v
 ```
 
 ## Folder Structure
@@ -28,6 +76,7 @@ tests/manager_stress/
 ├── README.md                    # ← You are here
 ├── PLAN.md                      # Original stress test plan
 ├── PLAN_500_SANDBOX_8HR.md      # 500-sandbox 8-hour test plan
+├── PLAN_40_SANDBOX_1HR.md       # 40-sandbox 1-hour test plan
 │
 ├── __main__.py                  # CLI entry point
 ├── config.py                    # Scenarios & configuration
@@ -36,7 +85,10 @@ tests/manager_stress/
 ├── workload_generator.py        # Program selection
 ├── metrics_collector.py         # Time-series metrics
 ├── reporter.py                  # HTML report generation
-└── algorithm_comparison.py      # Adaptive algorithm benchmarks
+├── algorithm_comparison.py      # Adaptive algorithm benchmarks
+│
+├── algorithmic_simulator.py     # AlgorithmicMockManager for dry-run
+└── test_algorithmic_simulator.py # Unit tests for simulator
 ```
 
 ## Available Scenarios
@@ -45,6 +97,7 @@ tests/manager_stress/
 |----------|----------|-------|-----------|---------|
 | `quick_validation` | 10 min | 4 | 8 | Smoke test |
 | `burst_test` | 30 min | 20 | 30 | Pool exhaustion |
+| `sandbox_40_1hr` | 1 hr | 16 | 40 | Medium scale validation |
 | `steady_state` | 1 hr | 24 | 40 | Sustained load |
 | `scale_cycle` | 90 min | 30 | 40 | Scale up/down |
 | `full_stress` | 2h 10m | 50 | 50 | Full stress |
@@ -119,8 +172,10 @@ tests/artifacts/stress/
 
 | Scenario | Sandboxes | Duration | Est. Cost |
 |----------|-----------|----------|-----------|
+| Any scenario (dry-run) | 0 | seconds | $0 |
 | quick_validation | 8 | 10 min | ~$0.04 |
+| sandbox_40_1hr | 40 | 1 hr | ~$0.80 |
 | full_stress | 50 | 2 hr | ~$3 |
 | mega_stress_8hr | 500 | 8 hr | ~$120 |
 
-*Based on $0.03/sandbox/hour*
+*Based on $0.03/sandbox/hour. Dry-run mode uses no real sandboxes.*
