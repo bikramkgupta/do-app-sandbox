@@ -1,0 +1,18 @@
+{
+  "test_name": "Connect to Existing App",
+  "app_id": "057623bb-7434-4706-bb76-af6834681f33",
+  "component": "debug",
+  "connected": true,
+  "whoami": "debuguser",
+  "pwd": "/app",
+  "uname": "Linux debug-7674f4f87-tts6d 4.4.0 #1 SMP Sun Jan 10 15:06:54 PST 2016 x86_64 x86_64 x86_64 GNU/Linux",
+  "ps_aux": "USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\ndebugus+     1  0.0  1.0 1239244 22356 ?       Ssl  Jan02   0:45 /usr/local/bin/health-server\ndebugus+    21  0.0  0.3  13700  7276 ?        Ss   Jan02   0:00 bash\ndebugus+    33  0.0  0.3  13700  7072 ?        Ss   Jan02   0:00 bash\ndebugus+    48  0.0  0.3  13700  6428 ?        Ss   Jan02   0:00 bash",
+  "df_h": "Filesystem      Size  Used Avail Use% Mounted on\nnone             99G   52G   43G  55% /\nnone            7.9G     0  7.9G   0% /dev\nnone            7.9G     0  7.9G   0% /dev/shm\nnone             99G   52G   43G  55% /etc/hosts\nnone             99G   52G   43G  55% /etc/hostname\nnone            7.9G     0  7.9G   0% /sys/fs/cgroup\nnone             99G   52G   43G  55% /etc/resolv.conf\nnone             99G   52G   43G  55% /dev/termination-log\nnone            7.9G  4.0K  7.9G   1% /tmp",
+  "env_count": 62,
+  "file_list": [
+    "scripts",
+    "startup.sh"
+  ],
+  "error": null,
+  "timestamp": "2026-01-07T06:55:29.353224+00:00"
+}

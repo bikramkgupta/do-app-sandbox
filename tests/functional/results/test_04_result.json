@@ -1,0 +1,66 @@
+{
+  "test_name": "SandboxManager SDK",
+  "total_tests": 8,
+  "passed": 8,
+  "failed": 0,
+  "duration_s": 0.0008001327514648438,
+  "test_cases": [
+    {
+      "name": "poolconfig_defaults",
+      "passed": true,
+      "duration_s": 0.001,
+      "details": "max_ready=10, target_ready=0",
+      "error": null
+    },
+    {
+      "name": "poolconfig_custom",
+      "passed": true,
+      "duration_s": 0.001,
+      "details": "on_empty=fail, idle_timeout=120",
+      "error": null
+    },
+    {
+      "name": "poolconfig_validation",
+      "passed": true,
+      "duration_s": 0.001,
+      "details": "Correctly rejected invalid on_empty",
+      "error": null
+    },
+    {
+      "name": "manager_init",
+      "passed": true,
+      "duration_s": 0.001,
+      "details": "max_total=10",
+      "error": null
+    },
+    {
+      "name": "manager_lifecycle",
+      "passed": true,
+      "duration_s": 0.0002541542053222656,
+      "details": "lifecycle OK",
+      "error": null
+    },
+    {
+      "name": "context_manager",
+      "passed": true,
+      "duration_s": 0.0001888275146484375,
+      "details": "context manager OK",
+      "error": null
+    },
+    {
+      "name": "metrics",
+      "passed": true,
+      "duration_s": 0.00017714500427246094,
+      "details": "metrics: 2 pools",
+      "error": null
+    },
+    {
+      "name": "acquire_fail_mode",
+      "passed": true,
+      "duration_s": 0.00013971328735351562,
+      "details": "correctly raised PoolExhaustedError",
+      "error": null
+    }
+  ],
+  "timestamp": "2026-01-07T06:47:04.842097+00:00"
+}
