@@ -45,41 +45,69 @@ class Executor:
         """Build the doctl console command."""
         return f"doctl apps console {self.app_id} {self.component}"
 
-    def _connect(self, timeout: int = 30) -> pexpect.spawn:
+    def _connect(self, timeout: int = 30, max_retries: int = 2) -> pexpect.spawn:
         """Establish a connection to the container console.
 
         Args:
             timeout: Connection timeout in seconds
+            max_retries: Maximum connection attempts (default: 2, i.e., 1 retry)
 
         Returns:
             The pexpect child process
 
         Raises:
-            ConnectionError: If connection fails
+            ConnectionError: If connection fails after all retries
         """
         doctl_cmd = self._get_doctl_command()
+        last_error = None
 
-        try:
-            child = pexpect.spawn(doctl_cmd, timeout=timeout)
-            child.setecho(False)
-            child.delayafterread = 0.05
-            child.delayafterwrite = 0.05
+        for attempt in range(max_retries):
+            child = None
+            try:
+                child = pexpect.spawn(doctl_cmd, timeout=timeout)
+                child.setecho(False)
+                child.delayafterread = 0.05
+                child.delayafterwrite = 0.05
 
-            # Wait for the initial shell prompt
-            child.expect(PROMPT_PATTERNS, timeout=timeout)
+                # Wait for the initial shell prompt
+                child.expect(PROMPT_PATTERNS, timeout=timeout)
 
-            return child
+                return child
 
-        except pexpect.exceptions.TIMEOUT:
-            raise ConnectionError(
-                f"Timed out waiting for shell prompt on {self.component}"
-            )
-        except pexpect.exceptions.EOF:
-            raise ConnectionError(
-                f"Connection closed unexpectedly while connecting to {self.component}"
-            )
-        except Exception as e:
-            raise ConnectionError(f"Failed to connect to {self.component}: {e}")
+            except pexpect.exceptions.TIMEOUT:
+                last_error = f"Timed out waiting for shell prompt on {self.component}"
+                # Clean up failed connection before retry
+                if child:
+                    try:
+                        child.close(force=True)
+                    except Exception:
+                        pass
+                if attempt < max_retries - 1:
+                    time.sleep(2)  # Brief pause before retry
+                    continue
+
+            except pexpect.exceptions.EOF:
+                last_error = f"Connection closed unexpectedly while connecting to {self.component}"
+                if child:
+                    try:
+                        child.close(force=True)
+                    except Exception:
+                        pass
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+
+            except Exception as e:
+                last_error = f"Failed to connect to {self.component}: {e}"
+                if child:
+                    try:
+                        child.close(force=True)
+                    except Exception:
+                        pass
+                # Don't retry on unexpected errors
+                break
+
+        raise ConnectionError(last_error)
 
     def _disconnect(self, child: pexpect.spawn) -> None:
         """Close the console connection and ensure PTY file descriptors are released.
