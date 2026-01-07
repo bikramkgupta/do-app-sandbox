@@ -22,7 +22,11 @@ tests/artifacts/*.log
 tests/artifacts/*.log.*
 tests/artifacts/*.txt
 tests/artifacts/*.json
+tests/artifacts/stress/
 !tests/artifacts/.gitkeep
+
+# Stress test execution programs (generated)
+sandbox-execution-programs/
 
 # IDE
 .idea/
@@ -36,3 +40,7 @@ Thumbs.db
 
 # Temp files
 sandbox_*_info.txt
+
+# Claude Code logs
+.claude-logs/
+uv.lock

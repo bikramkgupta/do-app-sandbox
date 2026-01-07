@@ -65,3 +65,30 @@ class ImageValidationError(SandboxError):
     """Raised when custom image validation fails."""
 
     pass
+
+
+# Pool/Manager exceptions
+
+
+class PoolError(SandboxError):
+    """Base exception for pool-related errors."""
+
+    pass
+
+
+class PoolExhaustedError(PoolError):
+    """Raised when pool is empty and on_empty='fail'."""
+
+    pass
+
+
+class PoolShutdownError(PoolError):
+    """Raised when acquire() called after shutdown initiated."""
+
+    pass
+
+
+class WarmUpTimeoutError(PoolError):
+    """Raised when warm_up() times out before pools reach target."""
+
+    pass

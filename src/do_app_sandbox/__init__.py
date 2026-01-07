@@ -42,6 +42,7 @@ __version__ = "0.1.0"
 # Main classes
 from .sandbox import Sandbox
 from .async_sandbox import AsyncSandbox
+from .manager import SandboxManager, PoolConfig, PoolMetrics
 
 # Environment variable constants
 from .sandbox import ENV_REGISTRY, ENV_REGION
@@ -71,6 +72,10 @@ from .exceptions import (
     SpacesNotConfiguredError,
     ImageNotValidatedError,
     ImageValidationError,
+    PoolError,
+    PoolExhaustedError,
+    PoolShutdownError,
+    WarmUpTimeoutError,
 )
 
 # Image registry
@@ -80,6 +85,10 @@ __all__ = [
     # Main classes
     "Sandbox",
     "AsyncSandbox",
+    # Pool management
+    "SandboxManager",
+    "PoolConfig",
+    "PoolMetrics",
     # Image management
     "ImageRegistry",
     # Configuration constants
@@ -107,4 +116,8 @@ __all__ = [
     "SpacesNotConfiguredError",
     "ImageNotValidatedError",
     "ImageValidationError",
+    "PoolError",
+    "PoolExhaustedError",
+    "PoolShutdownError",
+    "WarmUpTimeoutError",
 ]
