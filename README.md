@@ -16,13 +16,15 @@ A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platfo
 - **File operations**: Read, write, upload, and download files (Spaces-backed for large files)
 - **Process management**: Launch and manage background processes
 - **Async support**: Both synchronous and asynchronous APIs
+- **Pre-warmed pools**: SandboxManager for instant sandbox acquisition (eliminates 30s cold-start)
 - **CLI tool**: Manage sandboxes from the command line
 - **Hosted images**: Uses maintained Python and Node images; no custom image setup required
 - **Troubleshoot existing apps**: Connect to any App Platform app for troubleshooting ([guide](docs/troubleshooting_existing_apps.md))
 
 ## Documentation
-- Reference tables for SDK and CLI parameters/outputs: `docs/sandbox_reference.md`
-- Troubleshooting existing App Platform apps: `docs/troubleshooting_existing_apps.md`
+- **SandboxManager** (pre-warmed pools): [`docs/sandbox_manager.md`](docs/sandbox_manager.md)
+- Reference tables for SDK and CLI parameters/outputs: [`docs/sandbox_reference.md`](docs/sandbox_reference.md)
+- Troubleshooting existing App Platform apps: [`docs/troubleshooting_existing_apps.md`](docs/troubleshooting_existing_apps.md)
 
 ## Two Ways to Use This Package
 
@@ -252,6 +254,35 @@ async def main():
 asyncio.run(main())
 ```
 
+### SandboxManager (Pre-Warmed Pools)
+
+For high-throughput use cases, eliminate the 30s cold-start with pre-warmed pools:
+
+```python
+from do_app_sandbox import SandboxManager, PoolConfig
+
+async def main():
+    manager = SandboxManager(
+        pools={"python": PoolConfig(target_ready=3)},  # Keep 3 warm
+    )
+    await manager.start()
+
+    # Instant acquisition - no 30s wait!
+    sandbox = await manager.acquire(image="python")
+    result = sandbox.exec("python --version")
+    sandbox.delete()  # Single-use
+
+    await manager.shutdown()
+```
+
+**Key features:**
+- Per-image pools with configurable sizing
+- Adaptive scaling (scale to zero when idle)
+- Fallback to cold-start or fail-fast on empty pool
+- OpenTelemetry metrics for observability
+
+See [`docs/sandbox_manager.md`](docs/sandbox_manager.md) for full documentation.
+
 ## CLI Reference
 
 The `sandbox` CLI provides commands for managing sandboxes from the terminal.
@@ -471,7 +502,7 @@ See [App Platform Pricing](https://docs.digitalocean.com/products/app-platform/d
 
 ## Known Limitations
 
-1. **Deployment Time**: Creating a sandbox takes approximately 30-45 seconds
+1. **Deployment Time**: Creating a sandbox takes ~30 seconds (use [SandboxManager](docs/sandbox_manager.md) for instant acquisition)
 2. **Static Port**: User applications must listen on port 8080 (health checks are on port 9090)
 3. **Per-Command Console**: Each command opens a new console session
 4. **No Persistent Storage**: Data is lost when sandbox is deleted
