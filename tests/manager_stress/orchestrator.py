@@ -30,6 +30,7 @@ from .metrics_collector import MetricsCollector
 from .workload_generator import WorkloadGenerator
 from .user_simulator import UserSimulator, run_user_group
 from .reporter import generate_report
+from .algorithmic_simulator import AlgorithmicMockManager, create_algorithmic_mock
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,9 @@ class StressTestOrchestrator:
         if manager is not None:
             self.manager = manager
         elif dry_run:
-            self.manager = MockSandboxManager()
+            # Use algorithmic mock that faithfully implements limit tracking
+            self.manager = create_algorithmic_mock(scenario)
+            logger.info("Using AlgorithmicMockManager for dry-run (enforces real limits)")
         else:
             self.manager = self._create_manager()
 
@@ -174,6 +177,20 @@ class StressTestOrchestrator:
                 logger.info("Shutting down manager...")
                 await self.manager.shutdown()
 
+        # Report violations from algorithmic mock
+        violations = []
+        max_observed = 0
+        if hasattr(self.manager, 'get_violations'):
+            violations = self.manager.get_violations()
+            max_observed = self.manager.get_max_observed()
+            if violations:
+                logger.error(f"DETECTED {len(violations)} LIMIT VIOLATIONS!")
+                for v in violations:
+                    logger.error(f"  {v.violation_type}: {v.actual_value} > {v.limit_value}")
+                    logger.error(f"    at {v.timestamp}: {v.details}")
+            else:
+                logger.info(f"No limit violations detected (max observed: {max_observed}/{self.scenario.test_config.max_total_sandboxes})")
+
         # Generate reports
         logger.info("Generating reports...")
         files = self.metrics.save_all()
@@ -191,13 +208,22 @@ class StressTestOrchestrator:
         logger.info(f"Pool hit rate: {summary.pool_hit_rate:.1f}%")
         logger.info(f"Avg acquire latency: {summary.avg_acquire_latency_ms:.0f}ms")
         logger.info(f"Max concurrent: {summary.max_concurrent_sandboxes}")
+        if max_observed > 0:
+            logger.info(f"Max observed total: {max_observed}/{self.scenario.test_config.max_total_sandboxes}")
+        if violations:
+            logger.error(f"LIMIT VIOLATIONS: {len(violations)}")
         logger.info("=" * 60)
         logger.info(f"Report: {report_path}")
 
+        # Test passes if: success rate >= 95% AND no limit violations
+        test_passed = summary.success_rate >= 95.0 and len(violations) == 0
+
         return {
-            'success': summary.success_rate >= 95.0,
+            'success': test_passed,
             'summary': summary,
             'files': files,
+            'violations': violations,
+            'max_observed': max_observed,
         }
 
     async def _run_test(self, end_time: float):

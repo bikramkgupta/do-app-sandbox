@@ -167,6 +167,7 @@ class SandboxPool:
         # Pool state
         self._ready_queue: asyncio.Queue[_PooledSandbox] = asyncio.Queue()
         self._creating_count: int = 0
+        self._in_use_count: int = 0  # Track sandboxes that have been acquired
         self._lock = asyncio.Lock()
 
         # Tracking
@@ -193,10 +194,16 @@ class SandboxPool:
         """Number of sandboxes currently being created."""
         return self._creating_count
 
+    @property
+    def in_use_count(self) -> int:
+        """Number of sandboxes currently in use (acquired but not released)."""
+        return self._in_use_count
+
     def get_metrics(self) -> PoolMetrics:
         """Get current pool metrics."""
         self._metrics.ready = self.ready_count
         self._metrics.creating = self._creating_count
+        self._metrics.in_use = self._in_use_count
         if self._metrics.total_acquires > 0:
             self._metrics.pool_hit_rate = (
                 self._metrics.acquires_from_pool / self._metrics.total_acquires
@@ -269,11 +276,18 @@ class SandboxPool:
             latency_ms = (time.time() - start_time) * 1000
             self._record_acquire(from_pool=True, latency_ms=latency_ms)
             sandbox._from_pool = True  # Mark for external tracking
+            self._in_use_count += 1  # Track in-use sandbox
             return sandbox
 
         # Pool empty - handle based on config
         if self.config.on_empty == "fail":
             raise PoolExhaustedError(f"Pool for image '{self.image}' is exhausted")
+
+        # Check global limit before on-demand creation
+        if self._total_limit_callback and self._total_limit_callback():
+            raise PoolExhaustedError(
+                f"Global sandbox limit reached, cannot create on-demand for {self.image}"
+            )
 
         # Fall back to cold start
         logger.info(f"Pool empty for {self.image}, creating sandbox on-demand")
@@ -281,7 +295,20 @@ class SandboxPool:
         latency_ms = (time.time() - start_time) * 1000
         self._record_acquire(from_pool=False, latency_ms=latency_ms)
         sandbox._from_pool = False  # Mark for external tracking
+        self._in_use_count += 1  # Track in-use sandbox
         return sandbox
+
+    def release(self, sandbox: Sandbox) -> None:
+        """Release a sandbox back (decrement in-use count).
+
+        Call this when done with a sandbox to update the in-use count.
+        The sandbox itself should be deleted separately if not being reused.
+
+        Args:
+            sandbox: The sandbox to release
+        """
+        if self._in_use_count > 0:
+            self._in_use_count -= 1
 
     async def _try_acquire_from_pool(self) -> Optional[Sandbox]:
         """Try to get a sandbox from the pool without blocking."""
@@ -630,8 +657,11 @@ class SandboxManager:
             yield metrics.Observation(pool.creating_count, {"image": image})
 
     def _total_sandbox_count(self) -> int:
-        """Get total sandbox count across all pools."""
-        return sum(p.ready_count + p.creating_count for p in self._pools.values())
+        """Get total sandbox count across all pools (ready + creating + in_use)."""
+        return sum(
+            p.ready_count + p.creating_count + p.in_use_count
+            for p in self._pools.values()
+        )
 
     def _is_at_global_limit(self) -> bool:
         """Check if we've reached the global sandbox limit."""
@@ -709,6 +739,19 @@ class SandboxManager:
 
         pool = await self._get_or_create_pool(image)
         return await pool.acquire(timeout=timeout)
+
+    def release(self, sandbox: Sandbox, image: str) -> None:
+        """Release a sandbox (decrement in-use count for the pool).
+
+        Call this when done with a sandbox to update tracking.
+        This allows the global limit to correctly account for available capacity.
+
+        Args:
+            sandbox: The sandbox to release
+            image: The image identifier for the sandbox
+        """
+        if image in self._pools:
+            self._pools[image].release(sandbox)
 
     async def shutdown(
         self,

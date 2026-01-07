@@ -546,6 +546,67 @@ def get_scale_boundary() -> ScenarioConfig:
     )
 
 
+def get_sandbox_40_1hr() -> ScenarioConfig:
+    """40-sandbox test for 1 hour (20 Python, 20 Node)."""
+    return ScenarioConfig(
+        name="sandbox_40_1hr",
+        description="1-hour test - 40 sandboxes (20 Python, 20 Node), 16 users",
+        duration_seconds=3600,  # 1 hour
+        user_groups=[
+            # Python users - steady load
+            UserGroupConfig(
+                name="python_steady",
+                count=4,
+                image=ImageType.PYTHON,
+                pattern=LoadPattern.STEADY,
+                task_duration_range=(120, 300),  # 2-5 min
+                categories=["compute", "io", "mixed"],
+            ),
+            # Python users - burst
+            UserGroupConfig(
+                name="python_burst",
+                count=4,
+                image=ImageType.PYTHON,
+                pattern=LoadPattern.BURST,
+                task_duration_range=(60, 180),  # 1-3 min
+                categories=["compute", "io"],
+            ),
+            # Node users - steady load
+            UserGroupConfig(
+                name="node_steady",
+                count=4,
+                image=ImageType.NODE,
+                pattern=LoadPattern.STEADY,
+                task_duration_range=(120, 300),  # 2-5 min
+                categories=["compute", "io", "mixed"],
+            ),
+            # Node users - burst
+            UserGroupConfig(
+                name="node_burst",
+                count=4,
+                image=ImageType.NODE,
+                pattern=LoadPattern.BURST,
+                task_duration_range=(60, 180),  # 1-3 min
+                categories=["async", "io"],
+            ),
+        ],
+        test_config=TestConfig(
+            python_pool=PoolConfig(ImageType.PYTHON, target_ready=5, max_sandboxes=20),
+            node_pool=PoolConfig(ImageType.NODE, target_ready=5, max_sandboxes=20),
+            max_total_sandboxes=40,
+            max_concurrent_creates=10,
+            idle_timeout=120,
+            scale_down_delay=60,
+            cooldown_after_acquire=180,
+            max_warm_age=1200,  # 20 min max age
+        ),
+        idle_periods=[
+            (1200, 300),   # 5 min idle at 20 min mark
+            (2400, 300),   # 5 min idle at 40 min mark
+        ],
+    )
+
+
 SCENARIOS = {
     "quick_validation": get_quick_validation,
     "burst_test": get_burst_test,
@@ -555,6 +616,7 @@ SCENARIOS = {
     "mega_stress_8hr": get_mega_stress_8hr,
     "corner_case_blitz": get_corner_case_blitz,
     "scale_boundary": get_scale_boundary,
+    "sandbox_40_1hr": get_sandbox_40_1hr,
 }
 
 
