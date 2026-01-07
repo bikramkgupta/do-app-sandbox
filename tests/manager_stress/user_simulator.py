@@ -251,6 +251,14 @@ class UserSimulator:
 
     async def _release_sandbox(self, sandbox: Any):
         """Release a sandbox - sandboxes are single-use, so we delete them."""
+        # First, notify the manager that we're releasing (to update in_use_count)
+        image_name = self.group.image.value
+        if hasattr(self.manager, 'release'):
+            try:
+                self.manager.release(sandbox, image_name)
+            except Exception as e:
+                logger.warning(f"Failed to call manager.release: {e}")
+
         # SandboxManager sandboxes are single-use - delete when done
         # The pool replenishes by creating new sandboxes
         if hasattr(sandbox, 'delete'):
@@ -259,8 +267,6 @@ class UserSimulator:
                 await asyncio.to_thread(sandbox.delete)
             except Exception as e:
                 logger.warning(f"Failed to delete sandbox: {e}")
-        elif hasattr(self.manager, 'release'):
-            await self.manager.release(sandbox)
         elif hasattr(sandbox, 'close'):
             await sandbox.close()
 
