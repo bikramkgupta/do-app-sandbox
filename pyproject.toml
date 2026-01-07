@@ -67,3 +67,9 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/do_app_sandbox"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]
