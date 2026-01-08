@@ -420,17 +420,25 @@ class SandboxPool:
         target = self.config.target_ready if self._is_active else 0
         current = self.ready_count + self._creating_count
 
-        if current < target:
-            # Check global limit
-            if self._total_limit_callback and self._total_limit_callback():
-                logger.debug(f"Global sandbox limit reached, not creating for {self.image}")
-                return
+        if current >= target:
+            return
 
-            # Check pool limit
-            if current >= self.config.max_ready:
-                return
+        # Check global limit
+        if self._total_limit_callback and self._total_limit_callback():
+            logger.debug(f"Global sandbox limit reached, not creating for {self.image}")
+            return
 
-            # Create one sandbox
+        # Check pool limit
+        if current >= self.config.max_ready:
+            return
+
+        # Calculate how many sandboxes to create
+        needed = target - current
+        available = self.config.max_ready - current
+        to_create = min(needed, available)
+
+        # Start ALL needed creations at once (semaphore limits actual concurrency)
+        for _ in range(to_create):
             asyncio.create_task(self._create_and_add_to_pool())
             self._metrics.scale_up_events += 1
 
