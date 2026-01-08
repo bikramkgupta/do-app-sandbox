@@ -18,8 +18,8 @@ This plan addresses the critical and high-priority API gaps identified in the Cl
 | Priority | Feature | Effort | Approach |
 |----------|---------|--------|----------|
 | 🔴 Critical | `exec_stream()` | Medium | HTTP/2 + SSE via service |
-| 🔴 Critical | Port Exposure / Preview URLs | Medium | Internal reverse proxy in service |
-| 🔴 Critical | Auto-sleep / Hibernate | Medium | Snapshot + scale to 0 |
+| 🔴 Critical | Port Exposure / Preview URLs | Medium | FastAPI reverse proxy |
+| 🔴 Critical | Auto-sleep / Hibernate | Medium | Snapshot + delete sandbox |
 | 🟠 High | Process Logs API | Low | HTTP streaming endpoint |
 | 🟠 High | Sessions API | Medium | Server-side session management |
 | 🟠 High | `git_checkout()` | Low | Convenience wrapper |
@@ -33,24 +33,31 @@ This plan addresses the critical and high-priority API gaps identified in the Cl
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Sandbox Container (Service)               │
+│              Sandbox Container (Service Mode)                │
 ├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐    ┌─────────────────────────────────┐ │
-│  │  Sandbox API    │    │  User Processes                 │ │
-│  │  (FastAPI)      │    │  (npm start, python app.py)     │ │
-│  │  Port 8080      │    │  Ports 3000, 5000, etc.         │ │
-│  └────────┬────────┘    └─────────────────────────────────┘ │
-│           │                          ▲                       │
-│           │    ┌─────────────────────┘                       │
-│           ▼    ▼                                             │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │  Reverse Proxy (Caddy)                                  │ │
-│  │  - /api/* → Sandbox API (8080)                          │ │
-│  │  - /proxy/{port}/* → localhost:{port}                   │ │
-│  │  Port 80 (internal) → App Platform routes to 8080       │ │
-│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │  Sandbox API (FastAPI + uvicorn)                        ││
+│  │  Port 8080 (App Platform ingress)                       ││
+│  │                                                          ││
+│  │  Routes:                                                 ││
+│  │  - /health          → Health check (no auth)            ││
+│  │  - /api/*           → Sandbox API (auth required)       ││
+│  │  - /proxy/{port}/*  → Reverse proxy to localhost:port   ││
+│  └─────────────────────────────────────────────────────────┘│
+│                              │                               │
+│                              ▼                               │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │  User Processes                                         ││
+│  │  - python app.py (port 3000)                            ││
+│  │  - npm start (port 5000)                                ││
+│  │  - etc.                                                 ││
+│  └─────────────────────────────────────────────────────────┘│
+│                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**No Caddy needed** - FastAPI handles both API and port proxying directly via `httpx`.
 
 ### Authentication: Dynamic Token
 
@@ -101,8 +108,8 @@ POST /api/files/content                   → Write file
 POST /api/files/upload                    → Multipart upload
 GET  /api/files/download?path=...         → File download
 
-# Port Proxy (handled by Caddy)
-ANY  /proxy/{port}/*                      → Proxied to localhost:{port}
+# Port Proxy (handled by FastAPI)
+ANY  /proxy/{port}/{path:path}            → Proxied to localhost:{port}/{path}
 ```
 
 ### SSE Streaming Format
@@ -120,6 +127,131 @@ data: {"code": 0, "duration_ms": 5234}
 
 event: error
 data: {"message": "Command timed out", "code": "TIMEOUT"}
+```
+
+---
+
+## Container Images
+
+### Base Image Strategy
+
+| Image | Base | Runtime | Package Manager | Tools |
+|-------|------|---------|-----------------|-------|
+| `sandbox-python` | Debian slim | Python 3.12 | **uv** (default), pip | git, curl, build-essential |
+| `sandbox-node` | Debian slim | **Bun** (default), Node 22 | **bun** (default), npm, yarn | git, curl |
+
+### Why uv for Python?
+
+- **10-100x faster** than pip for package installation
+- Drop-in pip replacement: `uv pip install`
+- Virtual environment management: `uv venv`
+- Rust-based, single binary
+- Still supports pip for compatibility
+
+### Why Bun for Node?
+
+- **Faster runtime** than Node.js for many workloads
+- **Faster package installs** than npm/yarn
+- Built-in TypeScript support
+- Compatible with npm packages
+- Node.js still available for compatibility
+
+### Python Service Image
+
+```dockerfile
+# images/sandbox-python-service/Dockerfile
+FROM python:3.12-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git curl build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (fast Python package manager)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
+
+# Install sandbox API dependencies
+RUN uv pip install --system fastapi uvicorn[standard] httpx
+
+# Copy sandbox API server
+COPY sandbox_api/ /opt/sandbox_api/
+
+# Create workspace
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+ENV SANDBOX_MODE=service
+ENV PATH="/root/.cargo/bin:$PATH"
+
+EXPOSE 8080
+
+CMD ["uvicorn", "sandbox_api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+### Node Service Image
+
+```dockerfile
+# images/sandbox-node-service/Dockerfile
+FROM oven/bun:1-slim
+
+# Install Node.js for compatibility
+RUN apt-get update && apt-get install -y \
+    git curl nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install sandbox API (Python-based, or could be Bun-based)
+# Option A: Python API server
+RUN apt-get update && apt-get install -y python3 python3-pip \
+    && pip3 install fastapi uvicorn httpx \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY sandbox_api/ /opt/sandbox_api/
+
+# Create workspace
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+ENV SANDBOX_MODE=service
+
+EXPOSE 8080
+
+CMD ["python3", "-m", "uvicorn", "sandbox_api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+### Worker Images (No API Server)
+
+```dockerfile
+# images/sandbox-python-worker/Dockerfile
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y \
+    git curl build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
+
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+# Keep container running for doctl console access
+CMD ["tail", "-f", "/dev/null"]
+```
+
+```dockerfile
+# images/sandbox-node-worker/Dockerfile
+FROM oven/bun:1-slim
+
+RUN apt-get update && apt-get install -y \
+    git curl nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+CMD ["tail", "-f", "/dev/null"]
 ```
 
 ---
@@ -184,6 +316,8 @@ def _build_app_spec(self, name: str, image: str, mode: SandboxMode,
 def _build_service_spec(self, name: str, image: str,
                         config: ServiceConfig) -> dict:
     """Build service spec with HTTP API."""
+    token = config.token or secrets.token_urlsafe(32)
+
     return {
         "name": name,
         "region": self._region,
@@ -192,37 +326,33 @@ def _build_service_spec(self, name: str, image: str,
             "image": {
                 "registry_type": "GHCR",
                 "registry": self._registry,
-                "repository": f"sandbox-{image}-service",  # Service variant
+                "repository": f"sandbox-{image}-service",
                 "tag": "latest"
             },
             "instance_size_slug": self._instance_size,
             "instance_count": 1,
             "http_port": config.api_port,
+            "protocol": "HTTP2",  # For SSE streaming
             "envs": [
                 {
                     "key": "SANDBOX_API_TOKEN",
                     "scope": "RUN_TIME",
                     "type": "SECRET",
-                    "value": config.token or secrets.token_urlsafe(32)
+                    "value": token
                 },
                 {
                     "key": "SANDBOX_MODE",
                     "scope": "RUN_TIME",
                     "value": "service"
-                },
-                {
-                    "key": "PROXY_PORTS",
-                    "scope": "RUN_TIME",
-                    "value": ",".join(str(p) for p in config.proxy_ports)
                 }
             ],
             "health_check": {
                 "http_path": "/health",
-                "initial_delay_seconds": 10,
+                "initial_delay_seconds": 5,
                 "period_seconds": 10
             }
         }]
-    }
+    }, token  # Return token for SDK to store
 ```
 
 ### SDK Client for Service Mode
@@ -230,6 +360,7 @@ def _build_service_spec(self, name: str, image: str,
 ```python
 # New file: service_client.py
 import httpx
+import json
 from typing import AsyncGenerator, Generator
 
 class SandboxServiceClient:
@@ -238,59 +369,73 @@ class SandboxServiceClient:
     def __init__(self, base_url: str, token: str):
         self._base_url = base_url.rstrip('/')
         self._token = token
-        self._client = httpx.Client(
-            base_url=self._base_url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=120.0
-        )
+        self._headers = {"Authorization": f"Bearer {token}"}
 
     def exec(self, command: str, env: dict = None,
              cwd: str = None, timeout: int = 120) -> CommandResult:
         """Execute command and return result."""
-        response = self._client.post("/api/exec", json={
-            "command": command,
-            "env": env,
-            "cwd": cwd,
-            "timeout": timeout
-        })
-        response.raise_for_status()
-        data = response.json()
-        return CommandResult(
-            stdout=data["stdout"],
-            stderr=data["stderr"],
-            exit_code=data["exit_code"]
-        )
+        with httpx.Client(timeout=timeout + 10) as client:
+            response = client.post(
+                f"{self._base_url}/api/exec",
+                json={"command": command, "env": env, "cwd": cwd, "timeout": timeout},
+                headers=self._headers
+            )
+            response.raise_for_status()
+            data = response.json()
+            return CommandResult(
+                stdout=data["stdout"],
+                stderr=data["stderr"],
+                exit_code=data["exit_code"]
+            )
 
     def exec_stream(self, command: str, **kwargs) -> Generator[StreamEvent, None, None]:
         """Execute command with streaming output via SSE."""
-        with self._client.stream("POST", "/api/exec/stream", json={
-            "command": command, **kwargs
-        }) as response:
-            for line in response.iter_lines():
-                if line.startswith("data: "):
-                    data = json.loads(line[6:])
-                    yield StreamEvent(
-                        type=data["type"],
-                        data=data.get("line", ""),
-                        timestamp=data["timestamp"]
-                    )
+        with httpx.Client(timeout=None) as client:
+            with client.stream(
+                "POST",
+                f"{self._base_url}/api/exec/stream",
+                json={"command": command, **kwargs},
+                headers=self._headers
+            ) as response:
+                for line in response.iter_lines():
+                    if line.startswith("event: "):
+                        event_type = line[7:]
+                    elif line.startswith("data: "):
+                        data = json.loads(line[6:])
+                        yield StreamEvent(
+                            type=event_type,
+                            data=data.get("line", ""),
+                            timestamp=data.get("timestamp", 0)
+                        )
 
 class AsyncSandboxServiceClient:
     """Async HTTP client for service-mode sandboxes."""
 
+    def __init__(self, base_url: str, token: str):
+        self._base_url = base_url.rstrip('/')
+        self._token = token
+        self._headers = {"Authorization": f"Bearer {token}"}
+
     async def exec_stream(self, command: str, **kwargs) -> AsyncGenerator[StreamEvent, None]:
         """Async streaming execution."""
-        async with self._client.stream("POST", "/api/exec/stream", json={
-            "command": command, **kwargs
-        }) as response:
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    data = json.loads(line[6:])
-                    yield StreamEvent(
-                        type=data["type"],
-                        data=data.get("line", ""),
-                        timestamp=data["timestamp"]
-                    )
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "POST",
+                f"{self._base_url}/api/exec/stream",
+                json={"command": command, **kwargs},
+                headers=self._headers
+            ) as response:
+                event_type = "stdout"
+                async for line in response.aiter_lines():
+                    if line.startswith("event: "):
+                        event_type = line[7:]
+                    elif line.startswith("data: "):
+                        data = json.loads(line[6:])
+                        yield StreamEvent(
+                            type=event_type,
+                            data=data.get("line", ""),
+                            timestamp=data.get("timestamp", 0)
+                        )
 ```
 
 ### Files to Create/Modify
@@ -305,60 +450,52 @@ class AsyncSandboxServiceClient:
 
 ---
 
-## 2. Container Image: Service Variant
+## 2. Sandbox API Server (Container)
 
 ### Goal
-Create sandbox container images with built-in HTTP API and reverse proxy.
+FastAPI server running inside service containers, handling all API requests including port proxying.
 
-### Dockerfile Structure
-
-```dockerfile
-# sandbox-python-service/Dockerfile
-FROM ghcr.io/bikramkgupta/sandbox-python:latest
-
-# Install API server dependencies
-RUN pip install fastapi uvicorn[standard] httpx
-
-# Install Caddy for reverse proxy
-RUN apt-get update && apt-get install -y caddy && rm -rf /var/lib/apt/lists/*
-
-# Copy API server
-COPY sandbox_api/ /opt/sandbox_api/
-COPY Caddyfile /etc/caddy/Caddyfile
-COPY entrypoint.sh /entrypoint.sh
-
-ENV SANDBOX_MODE=service
-ENV SANDBOX_API_PORT=8080
-
-EXPOSE 8080
-
-ENTRYPOINT ["/entrypoint.sh"]
-```
-
-### API Server Implementation
+### Implementation
 
 ```python
 # sandbox_api/main.py
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import subprocess
 import asyncio
+import httpx
 import os
-import pty
-import select
+import json
+import time
 
-app = FastAPI()
+app = FastAPI(title="Sandbox API")
 
 SANDBOX_TOKEN = os.environ.get("SANDBOX_API_TOKEN", "")
 
-async def verify_token(authorization: str = Header(...)):
+# =============================================================================
+# Authentication
+# =============================================================================
+
+async def verify_token(authorization: str = Header(None)):
     """Verify bearer token."""
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Invalid authorization header")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing or invalid authorization header")
     token = authorization[7:]
     if token != SANDBOX_TOKEN:
         raise HTTPException(403, "Invalid token")
+
+# =============================================================================
+# Health Check (no auth)
+# =============================================================================
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "mode": "service"}
+
+# =============================================================================
+# Command Execution
+# =============================================================================
 
 class ExecRequest(BaseModel):
     command: str
@@ -370,10 +507,6 @@ class ExecResult(BaseModel):
     stdout: str
     stderr: str
     exit_code: int
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
 
 @app.post("/api/exec", response_model=ExecResult)
 async def exec_command(req: ExecRequest, _=Depends(verify_token)):
@@ -396,9 +529,9 @@ async def exec_command(req: ExecRequest, _=Depends(verify_token)):
             timeout=req.timeout
         )
         return ExecResult(
-            stdout=stdout.decode(),
-            stderr=stderr.decode(),
-            exit_code=proc.returncode
+            stdout=stdout.decode(errors='replace'),
+            stderr=stderr.decode(errors='replace'),
+            exit_code=proc.returncode or 0
         )
     except asyncio.TimeoutError:
         proc.kill()
@@ -409,7 +542,6 @@ async def exec_stream(req: ExecRequest, _=Depends(verify_token)):
     """Execute command with SSE streaming output."""
 
     async def generate():
-        import time
         env = os.environ.copy()
         if req.env:
             env.update(req.env)
@@ -423,35 +555,41 @@ async def exec_stream(req: ExecRequest, _=Depends(verify_token)):
         )
 
         async def read_stream(stream, stream_type):
+            """Read lines from stream and yield SSE events."""
             while True:
                 line = await stream.readline()
                 if not line:
                     break
-                yield f"event: {stream_type}\ndata: {json.dumps({'line': line.decode(), 'timestamp': time.time()})}\n\n"
+                yield f"event: {stream_type}\ndata: {json.dumps({'line': line.decode(errors='replace'), 'timestamp': time.time()})}\n\n"
 
-        # Merge stdout and stderr streams
-        import json
+        # Read both streams concurrently
+        stdout_gen = read_stream(proc.stdout, "stdout")
+        stderr_gen = read_stream(proc.stderr, "stderr")
 
-        stdout_task = asyncio.create_task(read_stream(proc.stdout, "stdout").__anext__())
-        stderr_task = asyncio.create_task(read_stream(proc.stderr, "stderr").__anext__())
+        async def merged_streams():
+            """Merge stdout and stderr streams."""
+            tasks = {
+                asyncio.create_task(stdout_gen.__anext__()): "stdout",
+                asyncio.create_task(stderr_gen.__anext__()): "stderr"
+            }
 
-        pending = {stdout_task, stderr_task}
+            while tasks:
+                done, _ = await asyncio.wait(tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
 
-        while pending:
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                try:
-                    result = task.result()
-                    yield result
-                    # Restart the task
-                    if task == stdout_task and proc.stdout:
-                        stdout_task = asyncio.create_task(read_stream(proc.stdout, "stdout").__anext__())
-                        pending.add(stdout_task)
-                    elif task == stderr_task and proc.stderr:
-                        stderr_task = asyncio.create_task(read_stream(proc.stderr, "stderr").__anext__())
-                        pending.add(stderr_task)
-                except StopAsyncIteration:
-                    pass
+                for task in done:
+                    stream_name = tasks.pop(task)
+                    try:
+                        result = task.result()
+                        yield result
+                        # Schedule next read from same stream
+                        gen = stdout_gen if stream_name == "stdout" else stderr_gen
+                        new_task = asyncio.create_task(gen.__anext__())
+                        tasks[new_task] = stream_name
+                    except StopAsyncIteration:
+                        pass  # Stream finished
+
+        async for event in merged_streams():
+            yield event
 
         await proc.wait()
         yield f"event: exit\ndata: {json.dumps({'code': proc.returncode, 'timestamp': time.time()})}\n\n"
@@ -461,349 +599,366 @@ async def exec_stream(req: ExecRequest, _=Depends(verify_token)):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
-```
 
-### Caddyfile for Reverse Proxy
+# =============================================================================
+# Port Proxy (replaces Caddy)
+# =============================================================================
 
-```caddyfile
-# /etc/caddy/Caddyfile
-{
-    auto_https off
-}
+@app.api_route("/proxy/{port}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+async def proxy_port(port: int, path: str, request: Request, _=Depends(verify_token)):
+    """Proxy requests to internal port."""
+    target_url = f"http://localhost:{port}/{path}"
 
-:8080 {
-    # Health check (no auth)
-    handle /health {
-        reverse_proxy localhost:8000
-    }
+    # Forward query string
+    if request.url.query:
+        target_url += f"?{request.url.query}"
 
-    # API endpoints
-    handle /api/* {
-        reverse_proxy localhost:8000
-    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            # Forward the request
+            response = await client.request(
+                method=request.method,
+                url=target_url,
+                headers={k: v for k, v in request.headers.items()
+                        if k.lower() not in ('host', 'authorization')},
+                content=await request.body()
+            )
 
-    # Dynamic port proxy: /proxy/3000/* → localhost:3000/*
-    handle /proxy/* {
-        uri strip_prefix /proxy
-        # Extract port from path and proxy
-        reverse_proxy {
-            to localhost:{http.request.uri.path.0}
-            header_up Host {http.reverse_proxy.upstream.hostport}
-        }
-    }
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+        except httpx.ConnectError:
+            raise HTTPException(502, f"Cannot connect to port {port}")
+        except httpx.TimeoutException:
+            raise HTTPException(504, f"Timeout connecting to port {port}")
 
-    # Default: proxy to primary user port
-    handle {
-        reverse_proxy localhost:3000
-    }
-}
-```
+# =============================================================================
+# Process Management
+# =============================================================================
 
-### Entrypoint Script
+# Process tracking
+_processes: dict = {}  # pid -> {"command": str, "log_file": str}
 
-```bash
-#!/bin/bash
-# /entrypoint.sh
+class BackgroundExecRequest(BaseModel):
+    command: str
+    cwd: str = "/workspace"
+    env: dict = None
 
-# Start the sandbox API server
-cd /opt/sandbox_api
-uvicorn main:app --host 127.0.0.1 --port 8000 &
-API_PID=$!
+@app.post("/api/exec/background")
+async def exec_background(req: BackgroundExecRequest, _=Depends(verify_token)):
+    """Start a background process."""
+    import uuid
+    log_file = f"/tmp/proc_{uuid.uuid4().hex[:8]}.log"
 
-# Start Caddy reverse proxy
-caddy run --config /etc/caddy/Caddyfile &
-CADDY_PID=$!
+    env = os.environ.copy()
+    if req.env:
+        env.update(req.env)
 
-# Wait for both to be ready
-sleep 2
+    # Start process with nohup, redirect output to log file
+    full_cmd = f"nohup {req.command} > {log_file} 2>&1 & echo $!"
 
-# Keep container running
-wait $API_PID $CADDY_PID
+    proc = await asyncio.create_subprocess_shell(
+        full_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        cwd=req.cwd,
+        env=env
+    )
+    stdout, _ = await proc.communicate()
+    pid = int(stdout.decode().strip())
+
+    _processes[pid] = {"command": req.command, "log_file": log_file}
+
+    return {"pid": pid, "log_file": log_file}
+
+@app.get("/api/processes")
+async def list_processes(_=Depends(verify_token)):
+    """List tracked background processes."""
+    result = []
+    for pid, info in list(_processes.items()):
+        # Check if still running
+        try:
+            os.kill(pid, 0)
+            status = "running"
+        except OSError:
+            status = "stopped"
+
+        result.append({
+            "pid": pid,
+            "command": info["command"],
+            "status": status,
+            "log_file": info["log_file"]
+        })
+    return result
+
+@app.get("/api/processes/{pid}/logs")
+async def get_process_logs(pid: int, tail: int = None, _=Depends(verify_token)):
+    """Get logs from a background process."""
+    if pid not in _processes:
+        raise HTTPException(404, f"Process {pid} not tracked")
+
+    log_file = _processes[pid]["log_file"]
+
+    if tail:
+        proc = await asyncio.create_subprocess_shell(
+            f"tail -n {tail} {log_file}",
+            stdout=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        return {"logs": stdout.decode(errors='replace')}
+    else:
+        try:
+            with open(log_file, 'r') as f:
+                return {"logs": f.read()}
+        except FileNotFoundError:
+            return {"logs": ""}
+
+@app.get("/api/processes/{pid}/logs/stream")
+async def stream_process_logs(pid: int, _=Depends(verify_token)):
+    """Stream logs from a background process (tail -f)."""
+    if pid not in _processes:
+        raise HTTPException(404, f"Process {pid} not tracked")
+
+    log_file = _processes[pid]["log_file"]
+
+    async def generate():
+        proc = await asyncio.create_subprocess_shell(
+            f"tail -f {log_file}",
+            stdout=asyncio.subprocess.PIPE
+        )
+
+        try:
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                yield f"data: {json.dumps({'line': line.decode(errors='replace'), 'timestamp': time.time()})}\n\n"
+        finally:
+            proc.kill()
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+@app.post("/api/processes/{pid}/kill")
+async def kill_process(pid: int, signal: int = 15, _=Depends(verify_token)):
+    """Kill a background process."""
+    try:
+        os.kill(pid, signal)
+        return {"success": True}
+    except OSError as e:
+        raise HTTPException(400, f"Failed to kill process: {e}")
 ```
 
 ---
 
-## 3. Streaming Command Execution (`exec_stream`)
+## 3. Hibernate: Snapshot + Delete (Cloudflare-aligned)
 
 ### Goal
-Enable real-time streaming of command output via HTTP/2 SSE.
+Cost-effective hibernation by snapshotting state and deleting the sandbox entirely.
 
-### Design (Updated for Service Mode)
+### Hibernate Conditions (Activity Tracking)
 
-```python
-# In sandbox.py
-class Sandbox:
-    def exec_stream(
-        self,
-        command: str,
-        env: Optional[Dict[str, str]] = None,
-        cwd: Optional[str] = None,
-        timeout: int = 120
-    ) -> Generator[StreamEvent, None, CommandResult]:
-        """Execute command with streaming output.
+**Activity = any of these keeps sandbox AWAKE:**
 
-        Note: Requires service mode. Falls back to buffered exec in worker mode.
+| Activity Type | Resets Idle Timer |
+|--------------|-------------------|
+| `exec()` / `exec_stream()` | Yes |
+| Active SSE connections (log streaming) | Yes (keeps awake while open) |
+| HTTP requests to `/proxy/*` | Yes |
+| File operations | Yes |
+| Session operations | Yes |
 
-        Usage:
-            for event in sandbox.exec_stream("npm run build"):
-                if event.type == "stdout":
-                    print(event.data, end="")
-        """
-        if self._mode == SandboxMode.SERVICE:
-            return self._service_client.exec_stream(command, env=env, cwd=cwd, timeout=timeout)
-        else:
-            # Worker mode fallback: execute and yield single event
-            result = self.exec(command, env=env, cwd=cwd, timeout=timeout)
-            yield StreamEvent(type="stdout", data=result.stdout, timestamp=time.time())
-            if result.stderr:
-                yield StreamEvent(type="stderr", data=result.stderr, timestamp=time.time())
-            yield StreamEvent(type="exit", data=str(result.exit_code), timestamp=time.time())
-```
+**Sandbox sleeps when:**
+1. No activity for `sleep_after` seconds (default: 600 = 10 min)
+2. No active SSE streams open
+3. User explicitly calls `sandbox.hibernate()`
 
-### Types
+### Design
 
 ```python
 # In types.py
 @dataclass
-class StreamEvent:
-    """A single streaming output event."""
-    type: Literal["stdout", "stderr", "exit", "error"]
-    data: str
-    timestamp: float
+class HibernationConfig:
+    """Configuration for sandbox hibernation (Cloudflare-aligned)."""
+    enabled: bool = True
+    sleep_after: int = 600  # Seconds of inactivity before hibernate
+    # Like Cloudflare's sleepAfter: "10m"
 
-    @property
-    def is_output(self) -> bool:
-        return self.type in ("stdout", "stderr")
+class SandboxState(Enum):
+    """Sandbox lifecycle states."""
+    CREATING = "creating"
+    ACTIVE = "active"
+    HIBERNATED = "hibernated"  # Snapshot exists, sandbox deleted
+    DELETED = "deleted"
 
-    @property
-    def is_complete(self) -> bool:
-        return self.type in ("exit", "error")
-```
-
----
-
-## 4. Process Logs API
-
-### Goal
-Access stdout/stderr from background processes.
-
-### Design
-
-```python
-# API endpoints in container
-GET /api/processes/{pid}/logs?tail=100      → Last 100 lines
-GET /api/processes/{pid}/logs/stream        → SSE stream (tail -f)
-
-# SDK methods
-class Sandbox:
-    def get_process_logs(
-        self,
-        pid: int,
-        tail: Optional[int] = None
-    ) -> str:
-        """Get logs from a background process."""
-        if self._mode == SandboxMode.SERVICE:
-            params = {"tail": tail} if tail else {}
-            response = self._service_client.get(f"/api/processes/{pid}/logs", params=params)
-            return response.text
-        else:
-            # Worker mode: read from tracked log file
-            log_file = self._process_manager._pid_to_logfile.get(pid)
-            if not log_file:
-                raise ValueError(f"No log file tracked for PID {pid}")
-            cmd = f"tail -n {tail} {log_file}" if tail else f"cat {log_file}"
-            return self.exec(cmd).stdout
-
-    def stream_process_logs(
-        self,
-        pid: int
-    ) -> Generator[str, None, None]:
-        """Stream logs from a background process."""
-        if self._mode == SandboxMode.SERVICE:
-            for event in self._service_client.stream_get(f"/api/processes/{pid}/logs/stream"):
-                yield event.data
-        else:
-            raise NotImplementedError("Log streaming requires service mode")
-```
-
----
-
-## 5. Sessions API
-
-### Goal
-Isolated execution contexts with persistent shell state.
-
-### Design
-
-```python
-# API endpoints in container
-POST   /api/sessions                → Create session
-GET    /api/sessions/{id}           → Get session info
-POST   /api/sessions/{id}/exec      → Execute in session
-POST   /api/sessions/{id}/exec/stream → Stream execute in session
-POST   /api/sessions/{id}/env       → Set environment variable
-DELETE /api/sessions/{id}           → Close session
-
-# Container-side session management
-class SessionManager:
-    """Manages shell sessions inside the container."""
-
-    def __init__(self):
-        self._sessions: Dict[str, Session] = {}
-
-    def create(self, session_id: str, env: dict = None, cwd: str = "/workspace") -> Session:
-        """Create a new session with persistent shell."""
-        import pty
-        master, slave = pty.openpty()
-
-        proc = subprocess.Popen(
-            ["/bin/bash", "-i"],
-            stdin=slave,
-            stdout=slave,
-            stderr=slave,
-            cwd=cwd,
-            env={**os.environ, **(env or {})}
-        )
-
-        session = Session(
-            id=session_id,
-            pid=proc.pid,
-            master_fd=master,
-            env=env or {},
-            cwd=cwd
-        )
-        self._sessions[session_id] = session
-        return session
-
-    def exec_in_session(self, session_id: str, command: str) -> str:
-        """Execute command in session's shell."""
-        session = self._sessions[session_id]
-        # Write command to PTY master
-        os.write(session.master_fd, f"{command}\n".encode())
-        # Read output...
-
-# SDK methods
-class Sandbox:
-    def create_session(
-        self,
-        session_id: str,
-        env: Optional[Dict[str, str]] = None,
-        cwd: str = "/workspace"
-    ) -> "Session":
-        """Create an isolated execution session."""
-        if self._mode == SandboxMode.SERVICE:
-            response = self._service_client.post("/api/sessions", json={
-                "session_id": session_id,
-                "env": env,
-                "cwd": cwd
-            })
-            return Session(self, session_id)
-        else:
-            raise NotImplementedError("Sessions require service mode")
-
-class Session:
-    """An isolated execution context within a sandbox."""
-
-    def __init__(self, sandbox: Sandbox, session_id: str):
-        self._sandbox = sandbox
-        self.id = session_id
-
-    def exec(self, command: str, timeout: int = 120) -> CommandResult:
-        """Execute command in this session."""
-        return self._sandbox._service_client.post(
-            f"/api/sessions/{self.id}/exec",
-            json={"command": command, "timeout": timeout}
-        )
-
-    def exec_stream(self, command: str) -> Generator[StreamEvent, None, None]:
-        """Stream command output in this session."""
-        return self._sandbox._service_client.stream_post(
-            f"/api/sessions/{self.id}/exec/stream",
-            json={"command": command}
-        )
-
-    def set_env(self, key: str, value: str) -> None:
-        """Set environment variable for this session."""
-        self._sandbox._service_client.post(
-            f"/api/sessions/{self.id}/env",
-            json={"key": key, "value": value}
-        )
-
-    def close(self) -> None:
-        """Close this session."""
-        self._sandbox._service_client.delete(f"/api/sessions/{self.id}")
-```
-
----
-
-## 6. Port Exposure / Preview URLs
-
-### Goal
-Dynamic port exposure with public URLs via internal reverse proxy.
-
-### Design
-
-```python
-# Caddy handles routing: /proxy/{port}/* → localhost:{port}
-
-# SDK methods
-class Sandbox:
-    def expose_port(self, port: int) -> ExposedPort:
-        """Get public URL for an internal port.
-
-        The port must be running a server inside the sandbox.
-        Uses internal Caddy proxy for routing.
-        """
-        if self._mode != SandboxMode.SERVICE:
-            raise NotImplementedError("Port exposure requires service mode")
-
-        base_url = self.get_url()  # https://app-xxx.ondigitalocean.app
-        proxy_url = f"{base_url}/proxy/{port}"
-
-        return ExposedPort(
-            port=port,
-            url=proxy_url,
-            protocol="https",
-            created_at=time.time()
-        )
-
-    def get_exposed_ports(self) -> List[ExposedPort]:
-        """List configured proxy ports."""
-        return [
-            ExposedPort(port=p, url=f"{self.get_url()}/proxy/{p}",
-                       protocol="https", created_at=0)
-            for p in self._service_config.proxy_ports
-        ]
-
-# Types
 @dataclass
-class ExposedPort:
-    port: int
-    url: str
-    protocol: Literal["http", "https"]
-    created_at: float
+class HibernatedSandbox:
+    """Reference to a hibernated sandbox."""
+    snapshot_id: str
+    image: str
+    mode: SandboxMode
+    service_config: Optional[ServiceConfig]
+    hibernated_at: float
+    metadata: Dict[str, Any]  # User-defined metadata
+
+# In sandbox.py
+class Sandbox:
+    _last_activity: float
+    _active_streams: int = 0
+    _hibernation_config: HibernationConfig
+    _state: SandboxState
+
+    def _record_activity(self):
+        """Record activity to reset idle timer."""
+        self._last_activity = time.time()
+
+    def _is_idle(self) -> bool:
+        """Check if sandbox is idle (ready to hibernate)."""
+        if self._active_streams > 0:
+            return False  # Active streams = not idle
+        idle_time = time.time() - self._last_activity
+        return idle_time > self._hibernation_config.sleep_after
+
+    def exec(self, command: str, ...) -> CommandResult:
+        """Execute command."""
+        self._ensure_awake()
+        self._record_activity()
+        # ... execute ...
+
+    def exec_stream(self, command: str, ...) -> Generator[StreamEvent, None, None]:
+        """Stream command execution."""
+        self._ensure_awake()
+        self._active_streams += 1
+        try:
+            self._record_activity()
+            # ... stream ...
+        finally:
+            self._active_streams -= 1
+            self._record_activity()
+
+    def hibernate(self) -> HibernatedSandbox:
+        """Hibernate sandbox: snapshot state and DELETE sandbox.
+
+        Unlike scale-to-0, this completely removes the sandbox to save costs.
+        Wake by acquiring new sandbox from pool + restore snapshot.
+
+        Returns:
+            HibernatedSandbox reference for later wake()
+        """
+        if self._state != SandboxState.ACTIVE:
+            raise SandboxError(f"Cannot hibernate sandbox in state {self._state}")
+
+        # Create snapshot
+        snapshot_id = f"hibernate-{self.app_id}-{int(time.time())}"
+        self.create_snapshot(
+            snapshot_id=snapshot_id,
+            paths=["/workspace", "/home", "/tmp"],
+            description=f"Hibernation snapshot for {self.app_id}"
+        )
+
+        # Store metadata for restoration
+        hibernated = HibernatedSandbox(
+            snapshot_id=snapshot_id,
+            image=self._image,
+            mode=self._mode,
+            service_config=self._service_config,
+            hibernated_at=time.time(),
+            metadata={"app_id": self.app_id}
+        )
+
+        # DELETE the sandbox (not just scale to 0)
+        self.delete()
+
+        self._state = SandboxState.HIBERNATED
+        return hibernated
+
+    @classmethod
+    def wake(cls, hibernated: HibernatedSandbox,
+             pool: Optional['SandboxManager'] = None) -> 'Sandbox':
+        """Wake a hibernated sandbox.
+
+        Args:
+            hibernated: Reference from hibernate()
+            pool: Optional pool for fast acquisition
+
+        Returns:
+            New Sandbox with restored state
+        """
+        # Acquire new sandbox (from pool if available, else create)
+        if pool:
+            sandbox = pool.acquire_sync(hibernated.image)
+        else:
+            sandbox = cls.create(
+                image=hibernated.image,
+                mode=hibernated.mode,
+                service_config=hibernated.service_config
+            )
+
+        # Restore snapshot
+        sandbox.restore_snapshot(hibernated.snapshot_id)
+
+        return sandbox
+
+    def _ensure_awake(self):
+        """Called before operations - wake if hibernated."""
+        if self._state == SandboxState.HIBERNATED:
+            raise SandboxError("Sandbox is hibernated. Call Sandbox.wake() first.")
 ```
 
-### Usage
+### Pool Integration for Fast Wake
 
 ```python
-# Start a server in the sandbox
-sandbox.exec("cd /workspace && npm start &")  # Starts on port 3000
+# In manager.py
+class SandboxManager:
+    async def acquire_with_snapshot(
+        self,
+        image: str,
+        snapshot_id: str,
+        timeout: float = 300
+    ) -> Sandbox:
+        """Acquire sandbox and restore snapshot for rapid startup.
 
-# Get preview URL
-port_info = sandbox.expose_port(3000)
-print(f"Preview: {port_info.url}")  # https://app-xxx.ondigitalocean.app/proxy/3000
+        Combines:
+        1. Pool acquisition (instant if warm sandbox available)
+        2. Snapshot restoration (few seconds for typical projects)
 
-# WebSocket also works through the proxy
-ws_url = port_info.url.replace("https://", "wss://")
+        Total wake time: ~5-15 seconds vs ~60-90s cold start
+        """
+        sandbox = await self.acquire(image, timeout=timeout)
+
+        snapshot_mgr = SnapshotManager(self._spaces_config)
+        snapshot_mgr.restore_snapshot(sandbox, snapshot_id)
+
+        return sandbox
+
+    async def wake_hibernated(
+        self,
+        hibernated: HibernatedSandbox,
+        timeout: float = 300
+    ) -> Sandbox:
+        """Wake a hibernated sandbox using pool."""
+        return await self.acquire_with_snapshot(
+            hibernated.image,
+            hibernated.snapshot_id,
+            timeout
+        )
 ```
+
+### Cost Comparison
+
+| Approach | Idle Cost | Wake Time |
+|----------|-----------|-----------|
+| Keep running | ~$5/mo per sandbox | Instant |
+| Scale to 0 | ~$1/mo (app exists) | 30-60s |
+| **Hibernate (snapshot + delete)** | ~$0.02/mo (Spaces only) | 5-15s (with pool) |
 
 ---
 
-## 7. Snapshot/Restore API
-
-### Goal
-Save and restore sandbox filesystem state to DO Spaces for rapid startup.
+## 4. Snapshot/Restore API
 
 ### Design
 
@@ -841,10 +996,10 @@ class SnapshotManager:
         paths = paths or ["/workspace"]
         exclude_patterns = exclude_patterns or [
             "*.pyc", "__pycache__", ".git/objects",
-            "node_modules/.cache", "*.log", ".env"
+            "node_modules/.cache", "*.log", ".env", ".venv"
         ]
 
-        # Build tar command
+        # Build tar command with exclusions
         excludes = " ".join(f"--exclude='{p}'" for p in exclude_patterns)
         paths_str = " ".join(paths)
         archive = f"/tmp/snapshot_{snapshot_id}.tar.gz"
@@ -860,10 +1015,16 @@ class SnapshotManager:
         size_result = sandbox.exec(f"stat -c %s {archive}")
         size_bytes = int(size_result.stdout.strip())
 
-        # Upload via presigned URL
+        # Upload via presigned URL (sandbox uploads directly to Spaces)
         spaces_key = f"{self._prefix}{snapshot_id}/archive.tar.gz"
-        upload_url = self._spaces.generate_presigned_upload_url(spaces_key)
-        sandbox.exec(f"curl -X PUT -T {archive} '{upload_url}'", timeout=600)
+        upload_url = self._spaces.generate_presigned_upload_url(spaces_key, expires_in=3600)
+
+        upload_result = sandbox.exec(
+            f"curl -X PUT -T {archive} '{upload_url}'",
+            timeout=600
+        )
+        if not upload_result.success:
+            raise SnapshotError(f"Failed to upload snapshot: {upload_result.stderr}")
 
         # Save metadata
         metadata = SnapshotMetadata(
@@ -877,7 +1038,7 @@ class SnapshotManager:
         )
         self._save_metadata(metadata)
 
-        # Cleanup
+        # Cleanup archive in sandbox
         sandbox.exec(f"rm -f {archive}")
 
         return metadata
@@ -895,10 +1056,15 @@ class SnapshotManager:
 
         # Download via presigned URL
         spaces_key = f"{self._prefix}{snapshot_id}/archive.tar.gz"
-        download_url = self._spaces.generate_presigned_download_url(spaces_key)
+        download_url = self._spaces.generate_presigned_download_url(spaces_key, expires_in=3600)
         archive = f"/tmp/restore_{snapshot_id}.tar.gz"
 
-        sandbox.exec(f"curl -sSfL -o {archive} '{download_url}'", timeout=600)
+        download_result = sandbox.exec(
+            f"curl -sSfL -o {archive} '{download_url}'",
+            timeout=600
+        )
+        if not download_result.success:
+            raise SnapshotError(f"Failed to download snapshot: {download_result.stderr}")
 
         # Extract
         result = sandbox.exec(f"tar -xzf {archive} -C {target_path}", timeout=600)
@@ -907,28 +1073,42 @@ class SnapshotManager:
         sandbox.exec(f"rm -f {archive}")
 
         return result.success
-```
 
-### Pool Integration
+    def _save_metadata(self, metadata: SnapshotMetadata):
+        """Save metadata to Spaces."""
+        key = f"{self._prefix}{metadata.snapshot_id}/metadata.json"
+        content = json.dumps(asdict(metadata)).encode()
+        self._spaces.put_object(key, content, content_type="application/json")
 
-```python
-# In manager.py
-class SandboxManager:
-    async def acquire_with_snapshot(
-        self,
-        image: str,
-        snapshot_id: str,
-        timeout: float = 300
-    ) -> Sandbox:
-        """Acquire sandbox and restore snapshot for rapid startup."""
-        # Get pre-warmed sandbox from pool
-        sandbox = await self.acquire(image, timeout=timeout)
+    def get_snapshot(self, snapshot_id: str) -> Optional[SnapshotMetadata]:
+        """Get snapshot metadata."""
+        key = f"{self._prefix}{snapshot_id}/metadata.json"
+        try:
+            content = self._spaces.get_object(key)
+            return SnapshotMetadata(**json.loads(content))
+        except:
+            return None
 
-        # Restore snapshot
-        snapshot_mgr = SnapshotManager(self._spaces_config)
-        snapshot_mgr.restore_snapshot(sandbox, snapshot_id)
+    def list_snapshots(self, prefix: str = None) -> List[SnapshotMetadata]:
+        """List all snapshots."""
+        search_prefix = f"{self._prefix}{prefix}" if prefix else self._prefix
+        keys = self._spaces.list_objects(search_prefix)
 
-        return sandbox
+        snapshots = []
+        for key in keys:
+            if key.endswith("/metadata.json"):
+                snapshot_id = key.split("/")[-2]
+                meta = self.get_snapshot(snapshot_id)
+                if meta:
+                    snapshots.append(meta)
+
+        return sorted(snapshots, key=lambda x: x.created_at, reverse=True)
+
+    def delete_snapshot(self, snapshot_id: str) -> bool:
+        """Delete a snapshot."""
+        self._spaces.delete_object(f"{self._prefix}{snapshot_id}/archive.tar.gz")
+        self._spaces.delete_object(f"{self._prefix}{snapshot_id}/metadata.json")
+        return True
 ```
 
 ### Storage Layout
@@ -936,107 +1116,202 @@ class SandboxManager:
 ```
 spaces-bucket/
 ├── snapshots/
-│   ├── snap-abc123/
+│   ├── snap-abc123def456/
+│   │   ├── metadata.json      # SnapshotMetadata as JSON
+│   │   └── archive.tar.gz     # Compressed filesystem
+│   ├── hibernate-app123-1704672000/
 │   │   ├── metadata.json
 │   │   └── archive.tar.gz
-│   └── snap-xyz789/
-│       ├── metadata.json
-│       └── archive.tar.gz
+│   └── ...
 ```
 
 ---
 
-## 8. Auto-Sleep / Hibernate
+## 5. Sessions API
 
 ### Goal
-Reduce costs by hibernating idle sandboxes, with automatic wake on access.
+Isolated execution contexts with persistent shell state.
 
-### Design
+### Container-Side Implementation
 
 ```python
-# In types.py
+# sandbox_api/sessions.py
+import os
+import pty
+import select
+import subprocess
+from dataclasses import dataclass
+from typing import Dict, Optional
+
 @dataclass
-class HibernationConfig:
-    enabled: bool = True
-    idle_timeout: int = 600  # 10 minutes
-    wake_on_access: bool = True
+class Session:
+    id: str
+    pid: int
+    master_fd: int
+    env: Dict[str, str]
+    cwd: str
 
-class SandboxState(Enum):
-    CREATING = "creating"
-    ACTIVE = "active"
-    HIBERNATED = "hibernated"
-    DELETED = "deleted"
+class SessionManager:
+    """Manages persistent shell sessions."""
 
-# In sandbox.py
-class Sandbox:
-    def hibernate(self) -> bool:
-        """Hibernate sandbox: snapshot state and scale to 0."""
-        if self._state != SandboxState.ACTIVE:
-            return False
+    def __init__(self):
+        self._sessions: Dict[str, Session] = {}
 
-        # Create hibernation snapshot
-        snapshot_id = f"hibernate-{self.app_id}"
-        self.create_snapshot(
-            snapshot_id=snapshot_id,
-            paths=["/workspace", "/home", "/tmp"],
-            tags={"type": "hibernation"}
+    def create(self, session_id: str, env: dict = None, cwd: str = "/workspace") -> Session:
+        """Create a new session with persistent bash shell."""
+        if session_id in self._sessions:
+            raise ValueError(f"Session {session_id} already exists")
+
+        master, slave = pty.openpty()
+
+        session_env = os.environ.copy()
+        if env:
+            session_env.update(env)
+
+        proc = subprocess.Popen(
+            ["/bin/bash", "--norc", "--noprofile", "-i"],
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            cwd=cwd,
+            env=session_env,
+            preexec_fn=os.setsid
         )
 
-        # Scale to 0 instances
-        self._deployer.scale(self.app_id, instances=0)
+        os.close(slave)
 
-        self._state = SandboxState.HIBERNATED
-        return True
+        session = Session(
+            id=session_id,
+            pid=proc.pid,
+            master_fd=master,
+            env=env or {},
+            cwd=cwd
+        )
+        self._sessions[session_id] = session
 
-    def wake(self, timeout: int = 120) -> bool:
-        """Wake hibernated sandbox: scale up and restore state."""
-        if self._state != SandboxState.HIBERNATED:
-            return self._state == SandboxState.ACTIVE
+        # Wait for shell prompt
+        self._read_until_prompt(master)
 
-        # Scale up
-        self._deployer.scale(self.app_id, instances=1)
-        self.wait_ready(timeout=timeout)
+        return session
 
-        # Restore state
-        snapshot_id = f"hibernate-{self.app_id}"
-        self.restore_snapshot(snapshot_id)
+    def exec_in_session(self, session_id: str, command: str, timeout: int = 120) -> str:
+        """Execute command in session's persistent shell."""
+        session = self._sessions.get(session_id)
+        if not session:
+            raise ValueError(f"Session {session_id} not found")
 
-        self._state = SandboxState.ACTIVE
-        return True
+        # Send command
+        os.write(session.master_fd, f"{command}\n".encode())
 
-    def _ensure_awake(self):
-        """Auto-wake if hibernated (called before operations)."""
-        if self._state == SandboxState.HIBERNATED and self._hibernation_config.wake_on_access:
-            self.wake()
+        # Read output until next prompt
+        output = self._read_until_prompt(session.master_fd, timeout)
 
-# In deployer.py
-def scale(self, app_id: str, instances: int) -> bool:
-    """Scale app to specified instance count."""
-    # Get current spec
-    result = subprocess.run(
-        ["doctl", "apps", "get", app_id, "--output", "json"],
-        capture_output=True, text=True
-    )
-    spec = json.loads(result.stdout)["spec"]
+        # Remove command echo and prompt from output
+        lines = output.split('\n')
+        if lines and command in lines[0]:
+            lines = lines[1:]
 
-    # Update instance count
-    if "services" in spec:
-        spec["services"][0]["instance_count"] = instances
-    elif "workers" in spec:
-        spec["workers"][0]["instance_count"] = instances
+        return '\n'.join(lines).strip()
 
-    # Update app
-    # ... doctl apps update ...
+    def _read_until_prompt(self, fd: int, timeout: int = 30) -> str:
+        """Read from PTY until shell prompt appears."""
+        output = []
+        while True:
+            ready, _, _ = select.select([fd], [], [], timeout)
+            if not ready:
+                break
+
+            try:
+                data = os.read(fd, 4096)
+                if not data:
+                    break
+                output.append(data.decode(errors='replace'))
+
+                # Check for prompt ($ or #)
+                if output[-1].rstrip().endswith(('$ ', '# ')):
+                    break
+            except OSError:
+                break
+
+        return ''.join(output)
+
+    def close(self, session_id: str):
+        """Close a session."""
+        session = self._sessions.pop(session_id, None)
+        if session:
+            os.close(session.master_fd)
+            try:
+                os.kill(session.pid, 9)
+            except OSError:
+                pass
+
+# Global session manager
+sessions = SessionManager()
+```
+
+### API Endpoints
+
+```python
+# In sandbox_api/main.py
+
+from .sessions import sessions, SessionManager
+
+class CreateSessionRequest(BaseModel):
+    session_id: str
+    env: dict = None
+    cwd: str = "/workspace"
+
+@app.post("/api/sessions")
+async def create_session(req: CreateSessionRequest, _=Depends(verify_token)):
+    """Create a new persistent session."""
+    try:
+        session = sessions.create(req.session_id, req.env, req.cwd)
+        return {"session_id": session.id, "pid": session.pid}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str, _=Depends(verify_token)):
+    """Get session info."""
+    if session_id not in sessions._sessions:
+        raise HTTPException(404, f"Session {session_id} not found")
+
+    session = sessions._sessions[session_id]
+    return {
+        "session_id": session.id,
+        "pid": session.pid,
+        "cwd": session.cwd,
+        "env": session.env
+    }
+
+class SessionExecRequest(BaseModel):
+    command: str
+    timeout: int = 120
+
+@app.post("/api/sessions/{session_id}/exec")
+async def session_exec(session_id: str, req: SessionExecRequest, _=Depends(verify_token)):
+    """Execute command in session."""
+    try:
+        output = await asyncio.to_thread(
+            sessions.exec_in_session,
+            session_id, req.command, req.timeout
+        )
+        return {"output": output}
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+@app.delete("/api/sessions/{session_id}")
+async def close_session(session_id: str, _=Depends(verify_token)):
+    """Close a session."""
+    sessions.close(session_id)
+    return {"success": True}
 ```
 
 ---
 
-## 9. Git Checkout Convenience Method
+## 6. Other Features
 
-### Goal
-Simple git clone without manual exec calls.
-
-### Implementation
+### git_checkout() Convenience Method
 
 ```python
 # In sandbox.py
@@ -1055,7 +1330,15 @@ class Sandbox:
         depth: int = 1,
         credentials: Optional[GitCredentials] = None
     ) -> CommandResult:
-        """Clone a git repository."""
+        """Clone a git repository.
+
+        Args:
+            url: Repository URL (HTTPS or SSH)
+            path: Destination path
+            branch: Branch to checkout
+            depth: Clone depth (1 for shallow)
+            credentials: Auth for private repos
+        """
         cmd = ["git", "clone"]
 
         if depth:
@@ -1063,12 +1346,14 @@ class Sandbox:
         if branch:
             cmd.extend(["--branch", branch])
 
-        # Handle authentication
         clone_url = url
+        env = None
+
         if credentials:
             if credentials.ssh_key:
-                # Write key and use SSH
-                self.filesystem.write_file("/tmp/git_key", credentials.ssh_key, mode="600")
+                # Write SSH key temporarily
+                self.filesystem.write_file("/tmp/git_key", credentials.ssh_key)
+                self.exec("chmod 600 /tmp/git_key")
                 env = {"GIT_SSH_COMMAND": "ssh -i /tmp/git_key -o StrictHostKeyChecking=no"}
             elif credentials.token:
                 # Embed token in HTTPS URL
@@ -1076,19 +1361,44 @@ class Sandbox:
                 parsed = urlparse(url)
                 auth = f"{credentials.username or 'git'}:{credentials.token}"
                 clone_url = urlunparse(parsed._replace(netloc=f"{auth}@{parsed.netloc}"))
-                env = None
-        else:
-            env = None
 
         cmd.extend([clone_url, path])
-
         result = self.exec(" ".join(cmd), env=env)
 
-        # Cleanup
+        # Cleanup SSH key
         if credentials and credentials.ssh_key:
             self.exec("rm -f /tmp/git_key")
 
         return result
+```
+
+### Port Exposure
+
+```python
+# In sandbox.py
+@dataclass
+class ExposedPort:
+    port: int
+    url: str
+    protocol: str  # "https" or "wss"
+
+class Sandbox:
+    def expose_port(self, port: int) -> ExposedPort:
+        """Get public URL for an internal port.
+
+        Requires service mode. Uses FastAPI reverse proxy.
+        """
+        if self._mode != SandboxMode.SERVICE:
+            raise NotImplementedError("Port exposure requires service mode")
+
+        base_url = self.get_url()
+        proxy_url = f"{base_url}/proxy/{port}"
+
+        return ExposedPort(
+            port=port,
+            url=proxy_url,
+            protocol="https"
+        )
 ```
 
 ---
@@ -1096,25 +1406,31 @@ class Sandbox:
 ## Implementation Order
 
 ### Phase 1: Foundation
-1. **Types & Service Mode** - Add `SandboxMode`, `ServiceConfig`, `StreamEvent`
-2. **Deployer Updates** - Service spec generation with token
+1. **Types** - Add `SandboxMode`, `ServiceConfig`, `StreamEvent`, `HibernationConfig`
+2. **Deployer** - Service spec generation with token
 3. **Service Client** - HTTP/SSE client for service mode
-4. **Container Image** - FastAPI + Caddy service variant
 
-### Phase 2: Core Features
-5. **exec_stream()** - Streaming execution via SSE
-6. **Process Logs API** - Log retrieval and streaming
-7. **Port Exposure** - Caddy proxy integration
+### Phase 2: Container Images
+4. **Python worker image** - With uv
+5. **Node worker image** - With bun
+6. **Python service image** - FastAPI + uvicorn + uv
+7. **Node service image** - FastAPI + bun/node
 
-### Phase 3: Advanced
-8. **Sessions API** - Isolated execution contexts
-9. **Snapshot/Restore** - Spaces-backed state persistence
-10. **Hibernate/Wake** - Cost optimization
+### Phase 3: Sandbox API Server
+8. **Core API** - exec, exec/stream, health
+9. **Process API** - background exec, logs, kill
+10. **Port Proxy** - /proxy/{port} routing
+11. **Sessions API** - Persistent shell sessions
 
-### Phase 4: Polish
-11. **git_checkout()** - Convenience method
-12. **Pool Integration** - `acquire_with_snapshot()`
-13. **Documentation & Tests**
+### Phase 4: Snapshot & Hibernate
+12. **SnapshotManager** - Create/restore/list/delete
+13. **Hibernate** - Snapshot + delete flow
+14. **Wake** - Pool acquire + restore flow
+
+### Phase 5: Integration & Polish
+15. **Pool integration** - `acquire_with_snapshot()`, `wake_hibernated()`
+16. **git_checkout()** - Convenience method
+17. **Documentation & Tests**
 
 ---
 
@@ -1122,60 +1438,101 @@ class Sandbox:
 
 | File | Status | Description |
 |------|--------|-------------|
-| `types.py` | Modify | Add SandboxMode, ServiceConfig, StreamEvent, etc. |
-| `deployer.py` | Modify | Add service spec, scale() method |
+| `types.py` | Modify | Add SandboxMode, ServiceConfig, StreamEvent, HibernationConfig |
+| `deployer.py` | Modify | Add service spec builder, return token |
 | `service_client.py` | **NEW** | HTTP/SSE client for service mode |
-| `snapshot.py` | **NEW** | Snapshot manager |
-| `sandbox.py` | Modify | Integrate service mode, add new methods |
+| `snapshot.py` | **NEW** | SnapshotManager |
+| `sandbox.py` | Modify | Service mode, hibernate/wake, activity tracking |
 | `async_sandbox.py` | Modify | Async service client |
-| `manager.py` | Modify | Add acquire_with_snapshot() |
-| `exceptions.py` | Modify | Add SnapshotError |
-| `container/` | **NEW** | Service container image (Dockerfile, API, Caddy) |
+| `manager.py` | Modify | acquire_with_snapshot(), wake_hibernated() |
+| `exceptions.py` | Modify | Add SnapshotError, SnapshotNotFoundError |
+| `images/` | **NEW** | Container images directory |
+| `images/sandbox-python-worker/` | **NEW** | Python worker Dockerfile |
+| `images/sandbox-python-service/` | **NEW** | Python service Dockerfile + API |
+| `images/sandbox-node-worker/` | **NEW** | Node/Bun worker Dockerfile |
+| `images/sandbox-node-service/` | **NEW** | Node/Bun service Dockerfile + API |
+| `images/sandbox_api/` | **NEW** | FastAPI server code for containers |
 
 ---
 
 ## Usage Examples
 
 ```python
+# =============================================================================
 # Basic worker mode (default, unchanged)
+# =============================================================================
 sandbox = Sandbox.create(image="python")
-result = sandbox.exec("python script.py")
+result = sandbox.exec("uv pip install requests && python script.py")
+sandbox.delete()
 
+# =============================================================================
 # Service mode with streaming
+# =============================================================================
 sandbox = Sandbox.create(
     image="python",
-    mode=SandboxMode.SERVICE,
-    service_config=ServiceConfig(proxy_ports=[3000, 8000])
+    mode=SandboxMode.SERVICE
 )
 
-# Stream command output
-for event in sandbox.exec_stream("pip install -r requirements.txt"):
-    print(event.data, end="", flush=True)
+# Stream command output in real-time
+for event in sandbox.exec_stream("uv pip install -r requirements.txt"):
+    if event.type == "stdout":
+        print(event.data, end="", flush=True)
 
 # Start server and get preview URL
 sandbox.exec("python -m http.server 3000 &")
 port_info = sandbox.expose_port(3000)
-print(f"Preview: {port_info.url}")
+print(f"Preview: {port_info.url}")  # https://app-xxx.ondigitalocean.app/proxy/3000
 
+# =============================================================================
 # Sessions for isolated contexts
+# =============================================================================
 dev_session = sandbox.create_session("dev", env={"DEBUG": "1"})
-dev_session.exec("npm run dev")
+dev_session.exec("cd /workspace && source .venv/bin/activate")
+dev_session.exec("python manage.py runserver &")
 
 test_session = sandbox.create_session("test", env={"NODE_ENV": "test"})
-test_session.exec("npm test")
+test_session.exec("bun test")
 
-# Snapshot and restore for rapid startup
-meta = sandbox.create_snapshot(description="deps installed")
+# =============================================================================
+# Snapshot for rapid startup
+# =============================================================================
+# After installing dependencies...
+meta = sandbox.create_snapshot(
+    description="Python app with deps",
+    paths=["/workspace"]
+)
+print(f"Snapshot: {meta.snapshot_id}, Size: {meta.size_bytes} bytes")
 
-# Later: rapid startup with pre-warmed pool + snapshot
+# Later: instant startup with pre-warmed pool + snapshot
 manager = SandboxManager(...)
 sandbox = await manager.acquire_with_snapshot("python", meta.snapshot_id)
-# Ready in seconds with all dependencies!
+# Ready in ~5-10 seconds with all dependencies!
 
-# Hibernate idle sandbox
-sandbox.hibernate()  # Saves state, scales to 0
-# ... later ...
-sandbox.wake()  # Scales up, restores state
+# =============================================================================
+# Hibernate idle sandbox (Cloudflare-style)
+# =============================================================================
+# Sandbox auto-hibernates after 10 min idle, or manually:
+hibernated = sandbox.hibernate()  # Snapshots state, DELETES sandbox
+print(f"Hibernated. Snapshot: {hibernated.snapshot_id}")
+
+# Cost while hibernated: ~$0.02/mo (Spaces storage only)
+
+# Wake later:
+sandbox = Sandbox.wake(hibernated, pool=manager)  # Pool acquire + restore
+# Back online in seconds!
+
+# =============================================================================
+# Node with Bun
+# =============================================================================
+sandbox = Sandbox.create(image="node", mode=SandboxMode.SERVICE)
+
+# Bun is the default runtime
+sandbox.exec("bun install")  # Fast!
+sandbox.exec("bun run build")
+
+# Node.js still available
+sandbox.exec("node --version")
+sandbox.exec("npm install legacy-package")
 ```
 
-This architecture leverages App Platform's native HTTP/2 capabilities for streaming while maintaining backward compatibility with worker mode for simple use cases.
+This architecture provides Cloudflare-like functionality while leveraging DO App Platform's native capabilities and maintaining cost efficiency through hibernate (snapshot + delete).
