@@ -109,6 +109,12 @@ from .exceptions import (
 # Image registry
 from .image_registry import ImageRegistry
 
+# Snapshot management
+from .snapshot import SnapshotManager
+
+# Service mode HTTP clients
+from .service_client import SandboxServiceClient, AsyncSandboxServiceClient
+
 __all__ = [
     # Main classes
     "Sandbox",
@@ -119,6 +125,11 @@ __all__ = [
     "PoolMetrics",
     # Image management
     "ImageRegistry",
+    # Snapshot management
+    "SnapshotManager",
+    # Service mode HTTP clients
+    "SandboxServiceClient",
+    "AsyncSandboxServiceClient",
     # Configuration constants
     "ENV_REGISTRY",
     "ENV_REGION",

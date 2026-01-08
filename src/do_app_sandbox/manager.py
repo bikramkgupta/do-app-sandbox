@@ -30,10 +30,11 @@ from .exceptions import (
     PoolExhaustedError,
     PoolShutdownError,
     SandboxCreationError,
+    SpacesNotConfiguredError,
     WarmUpTimeoutError,
 )
 from .sandbox import Sandbox
-from .types import SpacesConfig
+from .types import HibernatedSandbox, SpacesConfig
 
 logger = logging.getLogger(__name__)
 
@@ -846,3 +847,139 @@ class SandboxManager:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit."""
         await self.shutdown()
+
+    # =========================================================================
+    # Snapshot integration
+    # =========================================================================
+
+    async def acquire_with_snapshot(
+        self,
+        image: str,
+        snapshot_id: str,
+        *,
+        timeout: float = 300,
+        spaces_config: Optional[SpacesConfig] = None,
+    ) -> Sandbox:
+        """Acquire a sandbox and restore a snapshot for rapid startup.
+
+        Combines pool acquisition (instant if warm sandbox available) with
+        snapshot restoration (few seconds for typical projects).
+
+        Total wake time: ~5-15 seconds vs ~60-90s cold start.
+
+        Args:
+            image: The image identifier
+            snapshot_id: ID of snapshot to restore
+            timeout: Maximum time to wait for acquisition + restore
+            spaces_config: Spaces configuration (uses sandbox_defaults if not provided)
+
+        Returns:
+            A ready Sandbox with snapshot restored
+
+        Raises:
+            PoolShutdownError: If manager is shutting down
+            PoolExhaustedError: If pool is empty and on_empty='fail'
+            SpacesNotConfiguredError: If Spaces is not configured
+            SnapshotNotFoundError: If snapshot doesn't exist
+            SnapshotRestoreError: If restoration fails
+
+        Example:
+            >>> # Create a snapshot after setup
+            >>> meta = sandbox.create_snapshot(description="After deps install")
+            >>>
+            >>> # Later: instant acquisition with pre-installed deps
+            >>> sandbox = await manager.acquire_with_snapshot("python", meta.snapshot_id)
+            >>> # Ready in ~5-10 seconds with all dependencies!
+        """
+        # Acquire from pool
+        sandbox = await self.acquire(image, timeout=timeout)
+
+        # Get spaces config from sandbox_defaults if not provided
+        config = spaces_config or self._sandbox_defaults.get("spaces_config")
+        if config is None:
+            raise SpacesNotConfiguredError(
+                "Spaces configuration required for snapshot restoration. "
+                "Provide spaces_config parameter or include in sandbox_defaults."
+            )
+
+        # Restore snapshot
+        try:
+            from .snapshot import SnapshotManager
+            snapshot_mgr = SnapshotManager(config)
+            await asyncio.to_thread(
+                snapshot_mgr.restore_snapshot,
+                sandbox,
+                snapshot_id,
+                "/",
+                int(timeout)
+            )
+        except Exception as e:
+            # If restore fails, clean up the sandbox
+            try:
+                await asyncio.to_thread(sandbox.delete)
+            except Exception:
+                pass
+            raise
+
+        return sandbox
+
+    async def wake_hibernated(
+        self,
+        hibernated: HibernatedSandbox,
+        *,
+        timeout: float = 300,
+    ) -> Sandbox:
+        """Wake a hibernated sandbox using the pool.
+
+        Acquires a sandbox from the pool and restores the hibernation snapshot.
+        Much faster than Sandbox.wake() without a pool.
+
+        Args:
+            hibernated: HibernatedSandbox reference from sandbox.hibernate()
+            timeout: Maximum time for acquisition + restore
+
+        Returns:
+            A new Sandbox with hibernated state restored
+
+        Example:
+            >>> # Hibernate an idle sandbox
+            >>> hibernated = sandbox.hibernate()
+            >>>
+            >>> # Later: wake using pool
+            >>> sandbox = await manager.wake_hibernated(hibernated)
+            >>> # Ready in ~5-10 seconds!
+        """
+        return await self.acquire_with_snapshot(
+            hibernated.image,
+            hibernated.snapshot_id,
+            timeout=timeout
+        )
+
+    def acquire_sync(self, image: str, timeout: float = 300) -> Sandbox:
+        """Synchronous version of acquire for use in non-async contexts.
+
+        This runs the async acquire in a new event loop or the current one.
+
+        Args:
+            image: The image identifier
+            timeout: Maximum time to wait
+
+        Returns:
+            A ready Sandbox instance
+
+        Note:
+            Prefer the async acquire() method when possible.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an async context - use nest_asyncio or thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self.acquire(image, timeout=timeout)
+                )
+                return future.result(timeout=timeout)
+        except RuntimeError:
+            # No running loop - we can use asyncio.run directly
+            return asyncio.run(self.acquire(image, timeout=timeout))

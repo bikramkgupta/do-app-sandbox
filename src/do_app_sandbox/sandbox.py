@@ -2,6 +2,10 @@
 
 This module provides the primary interface for creating and managing
 sandbox environments on DigitalOcean App Platform.
+
+Supports two deployment modes:
+- WORKER (default): Uses doctl console for command execution
+- SERVICE: HTTP API with streaming support, port exposure, sessions
 """
 
 import json
@@ -10,15 +14,39 @@ import subprocess
 import time
 import uuid
 import shutil
-from typing import Dict, Optional, Union
+from typing import Dict, Generator, List, Optional, TYPE_CHECKING, Union
+from urllib.parse import urlparse, urlunparse
 
 from .deployer import DEFAULT_IMAGE_OWNER, DEFAULT_INSTANCE_SIZE, DEFAULT_REGION, Deployer
-from .exceptions import SandboxCreationError, SandboxNotFoundError, SandboxNotReadyError
+from .exceptions import (
+    SandboxCreationError,
+    SandboxNotFoundError,
+    SandboxNotReadyError,
+    SandboxHibernatedError,
+    ServiceNotAvailableError,
+    SnapshotError,
+)
 from .executor import Executor
 from .filesystem import FileSystem
 from .process import ProcessManager
 from .spaces import SpacesClient, create_spaces_config_from_env
-from .types import CommandResult, ProcessInfo, SpacesConfig
+from .types import (
+    CommandResult,
+    ExposedPort,
+    GitCredentials,
+    HibernatedSandbox,
+    HibernationConfig,
+    ProcessInfo,
+    SandboxMode,
+    SandboxState,
+    ServiceConfig,
+    SnapshotMetadata,
+    SpacesConfig,
+    StreamEvent,
+)
+
+if TYPE_CHECKING:
+    from .manager import SandboxManager
 
 # Environment variable names
 ENV_REGISTRY = "APP_SANDBOX_REGISTRY"
@@ -142,17 +170,29 @@ class Sandbox:
 
     The Sandbox class provides a complete interface for:
     - Creating and deleting sandbox containers
-    - Executing commands
+    - Executing commands (with optional streaming in service mode)
     - File system operations
     - Process management
-    - Accessing the public URL
+    - Port exposure and preview URLs (service mode)
+    - Hibernation (snapshot + delete for cost savings)
+
+    Deployment Modes:
+        - WORKER (default): Uses doctl console for execution. Simple but no streaming.
+        - SERVICE: HTTP API with SSE streaming, port exposure, sessions.
 
     Example usage:
+        >>> # Worker mode (default)
         >>> sandbox = Sandbox.create(image="python", name="my-sandbox")
-        >>> sandbox.filesystem.write_file("/app/script.py", "print('hello')")
-        >>> result = sandbox.exec("python /app/script.py")
-        >>> print(result.stdout)
-        hello
+        >>> result = sandbox.exec("python --version")
+        >>> sandbox.delete()
+
+        >>> # Service mode with streaming
+        >>> sandbox = Sandbox.create(
+        ...     image="python",
+        ...     mode=SandboxMode.SERVICE
+        ... )
+        >>> for event in sandbox.exec_stream("pip install requests"):
+        ...     print(event.data, end="")
         >>> sandbox.delete()
     """
 
@@ -163,6 +203,11 @@ class Sandbox:
         api_token: Optional[str] = None,
         spaces_config: Optional[Union[SpacesConfig, Dict]] = None,
         _deployer: Optional[Deployer] = None,
+        _mode: SandboxMode = SandboxMode.WORKER,
+        _service_config: Optional[ServiceConfig] = None,
+        _service_token: Optional[str] = None,
+        _image: str = "python",
+        _hibernation_config: Optional[HibernationConfig] = None,
     ):
         """Initialize a Sandbox instance.
 
@@ -176,13 +221,38 @@ class Sandbox:
             spaces_config: Optional SpacesConfig or dict for large file transfers.
                           If not provided, will try to load from environment variables.
             _deployer: Internal deployer instance (for testing)
+            _mode: Sandbox mode (WORKER or SERVICE)
+            _service_config: Configuration for service mode
+            _service_token: Auth token for service mode API
+            _image: Image type used (python, node)
+            _hibernation_config: Hibernation settings
         """
         self._app_id = app_id
         self._component = component
         self._api_token = api_token
         self._deployer = _deployer
-        self._executor = Executor(app_id, component)
         self._url: Optional[str] = None
+
+        # Mode and service configuration
+        self._mode = _mode
+        self._service_config = _service_config
+        self._service_token = _service_token
+        self._image = _image
+        self._hibernation_config = _hibernation_config or HibernationConfig()
+
+        # State tracking
+        self._state = SandboxState.ACTIVE
+        self._last_activity = time.time()
+        self._active_streams = 0
+
+        # Service client (lazy initialized for service mode)
+        self._service_client = None
+
+        # Worker mode: use doctl console executor
+        if _mode == SandboxMode.WORKER:
+            self._executor = Executor(app_id, component)
+        else:
+            self._executor = None  # Service mode uses HTTP client
 
         # Initialize Spaces client if configured
         self._spaces_client: Optional[SpacesClient] = None
@@ -195,12 +265,17 @@ class Sandbox:
                 pass
 
         # Initialize filesystem with optional Spaces support
-        self._filesystem = FileSystem(
-            self._executor,
-            spaces_client=self._spaces_client,
-            sandbox_id=app_id,
-        )
-        self._process = ProcessManager(self._executor)
+        if self._executor:
+            self._filesystem = FileSystem(
+                self._executor,
+                spaces_client=self._spaces_client,
+                sandbox_id=app_id,
+            )
+            self._process = ProcessManager(self._executor)
+        else:
+            # Service mode - filesystem/process via HTTP
+            self._filesystem = None
+            self._process = None
 
     def _resolve_spaces_config(
         self, config: Optional[Union[SpacesConfig, Dict]]
@@ -239,7 +314,9 @@ class Sandbox:
         name: Optional[str] = None,
         region: Optional[str] = None,
         instance_size: Optional[str] = None,
-        component_type: str = "service",
+        mode: SandboxMode = SandboxMode.WORKER,
+        service_config: Optional[ServiceConfig] = None,
+        hibernation_config: Optional[HibernationConfig] = None,
         registry: Optional[str] = None,
         api_token: Optional[str] = None,
         wait_ready: bool = True,
@@ -258,35 +335,40 @@ class Sandbox:
                 Falls back to APP_SANDBOX_REGION env var, then "atl1".
             instance_size: Instance size slug (e.g., "apps-s-1vcpu-1gb").
                 Defaults to "apps-s-1vcpu-1gb".
-            component_type: "service" for HTTP endpoint (default), "worker" for
-                background process without HTTP. Workers are useful for long-running
-                tasks that don't need a public URL.
+            mode: SandboxMode.WORKER (default) for doctl console execution,
+                SandboxMode.SERVICE for HTTP API with streaming support.
+            service_config: Configuration for service mode (API port, proxy ports, etc.)
+            hibernation_config: Configuration for auto-hibernation behavior
             registry: Optional registry host. If not provided, uses public
                 GHCR images from ghcr.io/bikramkgupta/.
             api_token: DigitalOcean API token (uses DIGITALOCEAN_TOKEN env if not set)
             wait_ready: If True, wait for the sandbox to be ready before returning
             timeout: Maximum time to wait for ready state (in seconds)
             spaces_config: Optional SpacesConfig or dict for large file transfers.
-                          Required for files >= 5MB. Dict should have keys:
-                          "bucket", "region", and optionally "access_key", "secret_key".
+                          Required for files >= 5MB and for snapshots/hibernation.
 
         Returns:
             A Sandbox instance connected to the new environment
 
         Raises:
             SandboxCreationError: If sandbox creation fails
-            ValueError: If an invalid image or component_type is specified
+            ValueError: If an invalid image is specified
 
         Example:
-            >>> # Simple creation with public GHCR images
+            >>> # Simple creation (worker mode, default)
             >>> sandbox = Sandbox.create(image="python")
-            >>> print(sandbox.app_id)
-            abc123-def456
+            >>> result = sandbox.exec("python --version")
+            >>> sandbox.delete()
 
-            >>> # Create a worker (no HTTP endpoint)
-            >>> worker = Sandbox.create(image="node", component_type="worker")
+            >>> # Service mode with streaming
+            >>> sandbox = Sandbox.create(
+            ...     image="python",
+            ...     mode=SandboxMode.SERVICE
+            ... )
+            >>> for event in sandbox.exec_stream("pip install requests"):
+            ...     print(event.data, end="")
 
-            >>> # With Spaces for large files
+            >>> # With Spaces for snapshots
             >>> sandbox = Sandbox.create(
             ...     image="python",
             ...     spaces_config={"bucket": "my-bucket", "region": "nyc3"}
@@ -308,11 +390,6 @@ class Sandbox:
         if image not in valid_images:
             raise ValueError(f"Invalid image '{image}'. Must be one of: {valid_images}")
 
-        # Validate component_type
-        valid_component_types = ("service", "worker")
-        if component_type not in valid_component_types:
-            raise ValueError(f"Invalid component_type '{component_type}'. Must be one of: {valid_component_types}")
-
         # Generate name if not provided
         if not name:
             name = f"sandbox-{uuid.uuid4().hex[:8]}"
@@ -325,7 +402,17 @@ class Sandbox:
             api_token=api_token,
         )
 
-        app_info = deployer.create_app(name, image, component_type=component_type)
+        # Determine component type based on mode
+        component_type = "worker" if mode == SandboxMode.WORKER else "service"
+
+        # Create the app
+        app_info, service_token = deployer.create_app(
+            name,
+            image,
+            component_type=component_type,
+            mode=mode,
+            service_config=service_config
+        )
 
         # Wait for ready if requested
         if wait_ready:
@@ -338,6 +425,11 @@ class Sandbox:
             api_token=api_token,
             spaces_config=spaces_config,
             _deployer=deployer,
+            _mode=mode,
+            _service_config=service_config,
+            _service_token=service_token,
+            _image=image,
+            _hibernation_config=hibernation_config,
         )
         sandbox._url = app_info.url
 
@@ -429,6 +521,9 @@ class Sandbox:
         Returns:
             CommandResult with stdout, stderr, and exit_code
 
+        Raises:
+            SandboxHibernatedError: If sandbox is hibernated
+
         Example:
             >>> result = sandbox.exec("python --version")
             >>> print(result.stdout)
@@ -436,7 +531,14 @@ class Sandbox:
             >>> print(result.exit_code)
             0
         """
-        return self._executor.execute(command, env=env, cwd=cwd, timeout=timeout)
+        self._ensure_awake()
+        self._record_activity()
+
+        if self._mode == SandboxMode.SERVICE:
+            client = self._get_service_client()
+            return client.exec(command, env=env, cwd=cwd or "/workspace", timeout=timeout)
+        else:
+            return self._executor.execute(command, env=env, cwd=cwd, timeout=timeout)
 
     def launch_process(
         self,
@@ -579,7 +681,8 @@ class Sandbox:
         )
 
     def __repr__(self) -> str:
-        return f"Sandbox(app_id={self._app_id!r}, component={self._component!r})"
+        mode_str = self._mode.value if self._mode else "worker"
+        return f"Sandbox(app_id={self._app_id!r}, mode={mode_str!r})"
 
     def __enter__(self) -> "Sandbox":
         """Context manager entry."""
@@ -588,3 +691,419 @@ class Sandbox:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Context manager exit - deletes the sandbox."""
         self.delete()
+
+    # =========================================================================
+    # Internal helpers
+    # =========================================================================
+
+    def _get_service_client(self):
+        """Get or create the service client for HTTP API mode."""
+        if self._service_client is None:
+            from .service_client import SandboxServiceClient
+            base_url = self.get_url()
+            if not self._service_token:
+                raise ServiceNotAvailableError(
+                    "Service token not available. Sandbox may not be in service mode."
+                )
+            self._service_client = SandboxServiceClient(
+                base_url=base_url,
+                token=self._service_token
+            )
+        return self._service_client
+
+    def _ensure_awake(self) -> None:
+        """Ensure sandbox is not hibernated before operations."""
+        if self._state == SandboxState.HIBERNATED:
+            raise SandboxHibernatedError(
+                "Sandbox is hibernated. Use Sandbox.wake() to restore it."
+            )
+
+    def _record_activity(self) -> None:
+        """Record activity to reset the idle timer."""
+        self._last_activity = time.time()
+
+    def _is_idle(self) -> bool:
+        """Check if sandbox is idle (ready to hibernate).
+
+        Returns:
+            True if no activity for sleep_after seconds and no active streams
+        """
+        if self._active_streams > 0:
+            return False
+        idle_time = time.time() - self._last_activity
+        return idle_time > self._hibernation_config.sleep_after
+
+    # =========================================================================
+    # Properties
+    # =========================================================================
+
+    @property
+    def mode(self) -> SandboxMode:
+        """The sandbox deployment mode (WORKER or SERVICE)."""
+        return self._mode
+
+    @property
+    def state(self) -> SandboxState:
+        """The sandbox lifecycle state."""
+        return self._state
+
+    @property
+    def image(self) -> str:
+        """The sandbox image type (python, node)."""
+        return self._image
+
+    # =========================================================================
+    # Streaming execution (service mode)
+    # =========================================================================
+
+    def exec_stream(
+        self,
+        command: str,
+        env: Optional[Dict[str, str]] = None,
+        cwd: str = "/workspace",
+        timeout: int = 120,
+    ) -> Generator[StreamEvent, None, None]:
+        """Execute a command with streaming output.
+
+        Streams stdout/stderr in real-time via SSE. Requires service mode.
+
+        Args:
+            command: Command to execute
+            env: Environment variables
+            cwd: Working directory
+            timeout: Command timeout in seconds
+
+        Yields:
+            StreamEvent objects with type (stdout/stderr/exit/error) and data
+
+        Raises:
+            ServiceNotAvailableError: If not in service mode
+            SandboxHibernatedError: If sandbox is hibernated
+
+        Example:
+            >>> for event in sandbox.exec_stream("pip install requests"):
+            ...     if event.type == "stdout":
+            ...         print(event.data, end="", flush=True)
+            ...     elif event.type == "exit":
+            ...         print(f"\\nExited with code: {event.data}")
+        """
+        if self._mode != SandboxMode.SERVICE:
+            raise ServiceNotAvailableError(
+                "exec_stream() requires service mode. "
+                "Create sandbox with mode=SandboxMode.SERVICE"
+            )
+
+        self._ensure_awake()
+        self._active_streams += 1
+
+        try:
+            self._record_activity()
+            client = self._get_service_client()
+            for event in client.exec_stream(command, env=env, cwd=cwd, timeout=timeout):
+                self._record_activity()
+                yield event
+        finally:
+            self._active_streams -= 1
+            self._record_activity()
+
+    # =========================================================================
+    # Port exposure (service mode)
+    # =========================================================================
+
+    def expose_port(self, port: int) -> ExposedPort:
+        """Get a public URL for an internal port.
+
+        The sandbox API proxies requests to the specified internal port,
+        allowing you to access services running inside the sandbox.
+
+        Requires service mode.
+
+        Args:
+            port: Internal port number to expose
+
+        Returns:
+            ExposedPort with public URL
+
+        Raises:
+            ServiceNotAvailableError: If not in service mode
+
+        Example:
+            >>> sandbox.exec("python -m http.server 3000 &")
+            >>> port_info = sandbox.expose_port(3000)
+            >>> print(port_info.url)
+            https://sandbox-xxx.ondigitalocean.app/proxy/3000
+        """
+        if self._mode != SandboxMode.SERVICE:
+            raise ServiceNotAvailableError(
+                "Port exposure requires service mode. "
+                "Create sandbox with mode=SandboxMode.SERVICE"
+            )
+
+        base_url = self.get_url()
+        proxy_url = f"{base_url}/proxy/{port}"
+
+        return ExposedPort(
+            port=port,
+            url=proxy_url,
+            protocol="https",
+            created_at=time.time()
+        )
+
+    # =========================================================================
+    # Git operations
+    # =========================================================================
+
+    def git_checkout(
+        self,
+        url: str,
+        path: str = "/workspace",
+        branch: Optional[str] = None,
+        depth: int = 1,
+        credentials: Optional[GitCredentials] = None,
+    ) -> CommandResult:
+        """Clone a git repository into the sandbox.
+
+        Args:
+            url: Repository URL (HTTPS or SSH)
+            path: Destination path (default: /workspace)
+            branch: Branch to checkout (default: default branch)
+            depth: Clone depth (default: 1 for shallow clone)
+            credentials: Optional credentials for private repos
+
+        Returns:
+            CommandResult from the git clone command
+
+        Example:
+            >>> result = sandbox.git_checkout("https://github.com/user/repo.git")
+            >>> if result.success:
+            ...     print("Clone successful")
+
+            >>> # Private repo with token
+            >>> creds = GitCredentials(token="ghp_xxx")
+            >>> sandbox.git_checkout(
+            ...     "https://github.com/user/private-repo.git",
+            ...     credentials=creds
+            ... )
+        """
+        self._ensure_awake()
+
+        cmd_parts = ["git", "clone"]
+
+        if depth:
+            cmd_parts.extend(["--depth", str(depth)])
+        if branch:
+            cmd_parts.extend(["--branch", branch])
+
+        clone_url = url
+        env = None
+
+        if credentials:
+            if credentials.ssh_key:
+                # Write SSH key temporarily
+                key_path = "/tmp/git_key"
+                self.filesystem.write_file(key_path, credentials.ssh_key)
+                self.exec(f"chmod 600 {key_path}")
+                env = {
+                    "GIT_SSH_COMMAND": f"ssh -i {key_path} -o StrictHostKeyChecking=no"
+                }
+            elif credentials.token:
+                # Embed token in HTTPS URL
+                parsed = urlparse(url)
+                auth = f"{credentials.username or 'git'}:{credentials.token}"
+                clone_url = urlunparse(
+                    parsed._replace(netloc=f"{auth}@{parsed.netloc}")
+                )
+
+        cmd_parts.extend([clone_url, path])
+        result = self.exec(" ".join(cmd_parts), env=env)
+
+        # Cleanup SSH key if used
+        if credentials and credentials.ssh_key:
+            self.exec("rm -f /tmp/git_key")
+
+        return result
+
+    # =========================================================================
+    # Snapshots
+    # =========================================================================
+
+    def create_snapshot(
+        self,
+        snapshot_id: Optional[str] = None,
+        paths: Optional[List[str]] = None,
+        description: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        timeout: int = 600,
+    ) -> SnapshotMetadata:
+        """Create a snapshot of sandbox filesystem state.
+
+        Snapshots are stored in DO Spaces and include dependencies
+        (node_modules, .venv) for rapid restoration.
+
+        Requires Spaces to be configured.
+
+        Args:
+            snapshot_id: Optional ID (auto-generated if not provided)
+            paths: Paths to include (default: ["/workspace"])
+            description: Optional human-readable description
+            tags: Optional key-value tags
+            timeout: Timeout for archive/upload in seconds
+
+        Returns:
+            SnapshotMetadata with snapshot details
+
+        Raises:
+            SpacesNotConfiguredError: If Spaces is not configured
+            SnapshotError: If snapshot creation fails
+
+        Example:
+            >>> meta = sandbox.create_snapshot(
+            ...     description="After installing dependencies"
+            ... )
+            >>> print(f"Snapshot: {meta.snapshot_id}, Size: {meta.size_bytes}")
+        """
+        self._ensure_awake()
+
+        from .snapshot import SnapshotManager
+        snapshot_mgr = SnapshotManager(self._spaces_config)
+        return snapshot_mgr.create_snapshot(
+            sandbox=self,
+            snapshot_id=snapshot_id,
+            paths=paths,
+            description=description,
+            tags=tags,
+            timeout=timeout
+        )
+
+    def restore_snapshot(
+        self,
+        snapshot_id: str,
+        target_path: str = "/",
+        timeout: int = 600,
+    ) -> bool:
+        """Restore a snapshot to this sandbox.
+
+        Args:
+            snapshot_id: ID of snapshot to restore
+            target_path: Base path for extraction
+            timeout: Timeout for download/extract in seconds
+
+        Returns:
+            True if restoration succeeded
+
+        Raises:
+            SnapshotNotFoundError: If snapshot doesn't exist
+            SnapshotRestoreError: If restoration fails
+        """
+        self._ensure_awake()
+
+        from .snapshot import SnapshotManager
+        snapshot_mgr = SnapshotManager(self._spaces_config)
+        return snapshot_mgr.restore_snapshot(
+            sandbox=self,
+            snapshot_id=snapshot_id,
+            target_path=target_path,
+            timeout=timeout
+        )
+
+    # =========================================================================
+    # Hibernation
+    # =========================================================================
+
+    def hibernate(self) -> HibernatedSandbox:
+        """Hibernate the sandbox: snapshot state and delete sandbox.
+
+        This creates a snapshot of the sandbox filesystem, then deletes
+        the sandbox entirely for cost savings. The sandbox can be restored
+        later using Sandbox.wake().
+
+        Cost comparison:
+        - Running sandbox: ~$5/month
+        - Hibernated (Spaces storage only): ~$0.02/month
+
+        Requires Spaces to be configured.
+
+        Returns:
+            HibernatedSandbox reference for later wake()
+
+        Raises:
+            SandboxHibernatedError: If already hibernated
+            SpacesNotConfiguredError: If Spaces not configured
+
+        Example:
+            >>> hibernated = sandbox.hibernate()
+            >>> print(f"Hibernated. Cost: ~$0.02/mo for {hibernated.snapshot_id}")
+            >>>
+            >>> # Later: wake the sandbox
+            >>> sandbox = Sandbox.wake(hibernated)
+        """
+        if self._state == SandboxState.HIBERNATED:
+            raise SandboxHibernatedError("Sandbox is already hibernated")
+
+        # Create hibernation snapshot
+        snapshot_id = f"hibernate-{self._app_id}-{int(time.time())}"
+        self.create_snapshot(
+            snapshot_id=snapshot_id,
+            paths=["/workspace", "/home", "/tmp"],
+            description=f"Hibernation snapshot for {self._app_id}"
+        )
+
+        # Store metadata for restoration
+        hibernated = HibernatedSandbox(
+            snapshot_id=snapshot_id,
+            image=self._image,
+            mode=self._mode,
+            service_config=self._service_config,
+            hibernated_at=time.time(),
+            metadata={"app_id": self._app_id}
+        )
+
+        # Delete the sandbox (not just scale to 0)
+        self.delete()
+
+        self._state = SandboxState.HIBERNATED
+        return hibernated
+
+    @classmethod
+    def wake(
+        cls,
+        hibernated: HibernatedSandbox,
+        pool: Optional["SandboxManager"] = None,
+        **create_kwargs
+    ) -> "Sandbox":
+        """Wake a hibernated sandbox.
+
+        Creates a new sandbox and restores the hibernation snapshot.
+        If a pool is provided, acquires from the pool for faster startup.
+
+        Args:
+            hibernated: HibernatedSandbox reference from hibernate()
+            pool: Optional SandboxManager for fast pool acquisition
+            **create_kwargs: Additional arguments for Sandbox.create()
+
+        Returns:
+            New Sandbox with restored state
+
+        Example:
+            >>> # Wake without pool (slower, ~60s)
+            >>> sandbox = Sandbox.wake(hibernated)
+            >>>
+            >>> # Wake with pool (faster, ~5-15s)
+            >>> manager = SandboxManager(...)
+            >>> sandbox = Sandbox.wake(hibernated, pool=manager)
+        """
+        # Acquire new sandbox
+        if pool:
+            sandbox = pool.acquire_sync(hibernated.image)
+        else:
+            sandbox = cls.create(
+                image=hibernated.image,
+                mode=hibernated.mode,
+                service_config=hibernated.service_config,
+                **create_kwargs
+            )
+
+        # Restore snapshot
+        sandbox.restore_snapshot(hibernated.snapshot_id)
+
+        return sandbox

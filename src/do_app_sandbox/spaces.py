@@ -256,6 +256,59 @@ class SpacesClient:
         except Exception:
             return None
 
+    def put_object(
+        self,
+        key: str,
+        content: bytes,
+        content_type: str = "application/octet-stream"
+    ) -> None:
+        """Upload content directly to Spaces.
+
+        Args:
+            key: Object key
+            content: Content to upload
+            content_type: MIME type of content
+        """
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=content,
+            ContentType=content_type
+        )
+
+    def get_object(self, key: str) -> bytes:
+        """Download content directly from Spaces.
+
+        Args:
+            key: Object key
+
+        Returns:
+            Content bytes
+
+        Raises:
+            Exception: If object not found
+        """
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response["Body"].read()
+
+    def list_objects(self, prefix: str = "") -> list:
+        """List objects with a given prefix.
+
+        Args:
+            prefix: Key prefix to filter by
+
+        Returns:
+            List of object keys
+        """
+        keys = []
+        paginator = self.client.get_paginator("list_objects_v2")
+
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                keys.append(obj["Key"])
+
+        return keys
+
 
 def get_large_file_threshold() -> int:
     """Get the configured large file threshold.
