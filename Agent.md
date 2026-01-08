@@ -8,16 +8,24 @@ Python SDK providing sandbox capabilities for DigitalOcean App Platform.
 ## Architecture
 ```
 Sandbox/AsyncSandbox (API) → Executor (pexpect) → doctl apps console → Container
+SandboxManager (Pool) → AsyncSandbox → Executor → Container
 ```
 
 ## Key Files
-- `src/do_app_sandbox/sandbox.py` - Main Sandbox class
+- `src/do_app_sandbox/sandbox.py` - Main Sandbox class (sync API)
+- `src/do_app_sandbox/async_sandbox.py` - AsyncSandbox class (async API)
+- `src/do_app_sandbox/manager.py` - SandboxManager for pool management
+- `src/do_app_sandbox/adaptive_pool.py` - Scaling algorithms (EMA, PID, Predictive)
 - `src/do_app_sandbox/executor.py` - Command execution via pexpect
 - `src/do_app_sandbox/filesystem.py` - File operations (base64)
+- `src/do_app_sandbox/process.py` - Process management
 - `src/do_app_sandbox/deployer.py` - App Platform deployment
 - `src/do_app_sandbox/cli.py` - CLI commands
 - `src/do_app_sandbox/image_registry.py` - Custom image management
+- `src/do_app_sandbox/image_validator.py` - Image validation
 - `src/do_app_sandbox/spaces.py` - DO Spaces integration for large files
+- `src/do_app_sandbox/types.py` - Type definitions
+- `src/do_app_sandbox/exceptions.py` - Custom exceptions
 
 ## CLI Commands
 ```bash
@@ -59,8 +67,70 @@ doctl apps logs -f APP_ID COMPONENT --type deploy # Follow deploy logs
 - **Port 8080**: Completely free for user applications
 - **Port 9090**: Internal health server (handled by sandbox, not user)
 
+## SDK Usage
+
+### Sync API (Sandbox)
+```python
+from do_app_sandbox import Sandbox
+
+sandbox = Sandbox.create(image="python")
+result = sandbox.exec("python --version")
+print(result.stdout)
+sandbox.delete()
+
+# Context manager
+with Sandbox.create(image="python") as sandbox:
+    result = sandbox.exec("echo 'Hello'")
+```
+
+### Async API (AsyncSandbox)
+```python
+from do_app_sandbox import AsyncSandbox
+
+sandbox = await AsyncSandbox.create(image="python")
+result = await sandbox.exec("python --version")
+await sandbox.delete()
+```
+
+### Pool Management (SandboxManager)
+Eliminates cold-start latency by maintaining pre-warmed sandboxes:
+```python
+from do_app_sandbox import SandboxManager, PoolConfig
+
+manager = SandboxManager(
+    pools={"python": PoolConfig(target_ready=3, max_ready=10)},
+)
+await manager.start()
+
+# Instant acquisition from pool
+sandbox = await manager.acquire(image="python")
+result = sandbox.exec("python --version")
+sandbox.delete()
+
+await manager.shutdown()
+```
+
+**PoolConfig options:**
+- `target_ready` - Target number of ready sandboxes (default: 0)
+- `max_ready` - Maximum sandboxes in pool (default: 10)
+- `idle_timeout` - Seconds before scaling down (default: 60)
+- `max_warm_age` - Max seconds a sandbox can warm (default: 1800)
+
+### Connecting to Existing Apps
+```python
+# Works with any App Platform app
+sandbox = Sandbox.get_from_id(app_id, component="your-component")
+```
+
+### Service vs Worker
+- **Service** (default): Has public HTTP endpoint on port 8080
+- **Worker**: No HTTP endpoint, for background tasks
+```python
+sandbox = Sandbox.create(image="python", component_type="worker")
+```
+
 ## Large File Transfers
-Files >= 5MB use DO Spaces as intermediary with time-limited presigned URLs:
+Files >= 5MB use DO Spaces as intermediary:
 ```python
 sandbox = Sandbox.create(
     image="python",
@@ -75,107 +145,77 @@ sandbox.filesystem.upload_large("/local/big.zip", "/app/big.zip")
 sandbox.filesystem.download_large("/app/output.tar.gz", "/local/output.tar.gz")
 ```
 
-**How it works**:
-- Upload: SDK uploads to Spaces via boto3, generates presigned URL (15 min), sandbox downloads via curl
-- Download: SDK generates presigned URL (15 min), sandbox uploads via curl, SDK downloads via boto3
-- No credentials in container - presigned URLs are time-limited and single-use
-- Spaces objects are deleted after transfer by default
-
-## SDK Usage Notes
-- `Sandbox.create(image="python")` - uses GHCR public images by default (no registry setup needed)
-- `Sandbox.create(image="python", component_type="worker")` - create a worker (no HTTP endpoint)
-- `Sandbox.create(image="python", registry="custom-registry-host")` - override registry host if needed
-- `Sandbox.get_from_id()` - connect to existing sandbox by app_id
-- Both `/app` and `/home/sandbox/app` work (symlinked)
-
-### Troubleshooting Existing Apps
-The SDK works with **any** App Platform app, not just sandboxes. Use `Sandbox.get_from_id(app_id, component="your-component")` to connect. See `docs/troubleshooting_existing_apps.md` for details.
-
-### Service vs Worker
-- **Service** (default): Has public HTTP endpoint on port 8080, ideal for web apps
-- **Worker**: No HTTP endpoint, ideal for background tasks, batch processing, or CLI tools
-
 ## Deploying Your Own App
 
 ### No Health Endpoint Required
-The sandbox automatically handles App Platform health checks on port 9090. Your app can run on port 8080 without implementing any health endpoint.
+The sandbox automatically handles App Platform health checks on port 9090. Your app runs on port 8080 without implementing any health endpoint.
 
 ### Simple Deployment
 ```python
-# Upload your app
 sandbox.filesystem.upload_file("app.py", "/home/sandbox/app/app.py")
-sandbox.filesystem.upload_file("requirements.txt", "/home/sandbox/app/requirements.txt")
 
-# Install dependencies (Python requires venv)
+# Python requires venv
 sandbox.exec("cd /home/sandbox/app && uv venv .venv")
 sandbox.exec("cd /home/sandbox/app && source .venv/bin/activate && uv pip install -r requirements.txt")
 
-# Start your app - just run it, no health endpoint needed!
+# Start app
 pid = sandbox.launch_process(
     "cd /home/sandbox/app && source .venv/bin/activate && python app.py",
     cwd="/home/sandbox/app"
 )
 ```
 
-### Requirements
-1. **Your app MUST listen on port 8080** - This is the only requirement
-2. **Python apps require a virtual environment** (uv-managed Python):
-   ```python
-   sandbox.exec("cd /home/sandbox/app && uv venv .venv")
-   sandbox.exec("cd /home/sandbox/app && source .venv/bin/activate && uv pip install -r requirements.txt")
-   ```
-
 ### Efficient File Transfers
-For initial deployment with many files (10+), use zip to transfer in bulk rather than file-by-file:
-
+For many files, use zip:
 ```python
-# LOCAL: Create zip of your project (excluding node_modules, .git, etc.)
 import shutil
-shutil.make_archive("/tmp/app", "zip", "/path/to/your/project")
-
-# Upload single zip file
+shutil.make_archive("/tmp/app", "zip", "/path/to/project")
 sandbox.filesystem.upload_file("/tmp/app.zip", "/home/sandbox/app.zip")
-
-# REMOTE: Unzip in sandbox
 sandbox.exec("cd /home/sandbox && unzip -o app.zip -d app && rm app.zip")
 ```
 
-**When to use each approach:**
-- **Zip upload**: Initial deployment, 10+ files, faster and more reliable
-- **Single file upload**: Quick edits, config changes, hot-reloading single files
+## Types
+Key types exported from `do_app_sandbox`:
+- `CommandResult` - Result of exec() with stdout, stderr, exit_code
+- `ProcessInfo` - Process information (pid, command, status)
+- `FileInfo` - File metadata
+- `AppInfo` - App Platform app information
+- `SpacesConfig` - Spaces configuration dict
+- `PoolConfig` - Pool configuration for SandboxManager
+- `PoolMetrics` - Pool metrics (ready, in_use, etc.)
 
-### Example Flask App (No Health Endpoint Needed)
+## Exceptions
 ```python
-# app.py - Just a normal Flask app
-from flask import Flask
-app = Flask(__name__)
-
-@app.route('/')
-def hello():
-    return 'Hello World!'
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
-```
-
-### Example Express App (No Health Endpoint Needed)
-```javascript
-// app.js - Just a normal Express app
-const express = require('express');
-const app = express();
-
-app.get('/', (req, res) => res.send('Hello World!'));
-
-app.listen(8080, () => console.log('Server running on port 8080'));
+from do_app_sandbox import (
+    SandboxError,           # Base exception
+    SandboxCreationError,   # Failed to create sandbox
+    SandboxNotFoundError,   # Sandbox not found
+    SandboxNotReadyError,   # Sandbox not ready
+    CommandExecutionError,  # Command failed
+    CommandTimeoutError,    # Command timed out
+    FileOperationError,     # File operation failed
+    ConnectionError,        # Connection failed
+    SpacesNotConfiguredError,
+    ImageNotValidatedError,
+    ImageValidationError,
+    PoolError,              # Base pool exception
+    PoolExhaustedError,     # No sandboxes available
+    PoolShutdownError,      # Pool is shutting down
+    WarmUpTimeoutError,     # Warm-up timed out
+)
 ```
 
 ## Custom Image Requirements
 Custom Dockerfiles must:
 1. `EXPOSE 8080` - For user application
 2. Have ENTRYPOINT or CMD
-3. Optionally: Include the sandbox health server on port 9090 (or implement your own)
+3. Optionally: Include the sandbox health server on port 9090
 
 ## Testing
 ```bash
 pytest tests/  # Requires DIGITALOCEAN_TOKEN
 ```
+
+## AI Assistant Guidance
+For comprehensive App Platform skills (troubleshooting, deployment, postgres, networking, etc.), see:
+https://github.com/bikramkgupta/do-app-platform-skills
