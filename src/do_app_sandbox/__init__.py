@@ -50,6 +50,22 @@ from .deployer import DEFAULT_REGION, DEFAULT_INSTANCE_SIZE
 
 # Types
 from .types import (
+    # Enums
+    SandboxMode,
+    SandboxState,
+    # Configuration
+    ServiceConfig,
+    HibernationConfig,
+    # Streaming
+    StreamEvent,
+    # Snapshots
+    SnapshotMetadata,
+    HibernatedSandbox,
+    # Git
+    GitCredentials,
+    # Port exposure
+    ExposedPort,
+    # Existing types
     CommandResult,
     ProcessInfo,
     FileInfo,
@@ -76,6 +92,18 @@ from .exceptions import (
     PoolExhaustedError,
     PoolShutdownError,
     WarmUpTimeoutError,
+    # Snapshot exceptions
+    SnapshotError,
+    SnapshotNotFoundError,
+    SnapshotUploadError,
+    SnapshotRestoreError,
+    # Service mode exceptions
+    ServiceModeError,
+    ServiceNotAvailableError,
+    ServiceConnectionError,
+    # Hibernation exceptions
+    HibernationError,
+    SandboxHibernatedError,
 )
 
 # Image registry
@@ -96,7 +124,22 @@ __all__ = [
     "ENV_REGION",
     "DEFAULT_REGION",
     "DEFAULT_INSTANCE_SIZE",
-    # Types
+    # Types - Enums
+    "SandboxMode",
+    "SandboxState",
+    # Types - Configuration
+    "ServiceConfig",
+    "HibernationConfig",
+    # Types - Streaming
+    "StreamEvent",
+    # Types - Snapshots
+    "SnapshotMetadata",
+    "HibernatedSandbox",
+    # Types - Git
+    "GitCredentials",
+    # Types - Port exposure
+    "ExposedPort",
+    # Types - Existing
     "CommandResult",
     "ProcessInfo",
     "FileInfo",
@@ -120,4 +163,16 @@ __all__ = [
     "PoolExhaustedError",
     "PoolShutdownError",
     "WarmUpTimeoutError",
+    # Snapshot exceptions
+    "SnapshotError",
+    "SnapshotNotFoundError",
+    "SnapshotUploadError",
+    "SnapshotRestoreError",
+    # Service mode exceptions
+    "ServiceModeError",
+    "ServiceNotAvailableError",
+    "ServiceConnectionError",
+    # Hibernation exceptions
+    "HibernationError",
+    "SandboxHibernatedError",
 ]
