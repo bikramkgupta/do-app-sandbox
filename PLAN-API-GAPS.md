@@ -991,12 +991,22 @@ class SnapshotManager:
         description: str = None,
         tags: Dict[str, str] = None
     ) -> SnapshotMetadata:
-        """Create a snapshot of sandbox filesystem."""
+        """Create a snapshot of sandbox filesystem.
+
+        NOTE: Snapshots include dependencies (node_modules, .venv) by default
+        for rapid startup. Only caches and temp files are excluded.
+        """
         snapshot_id = snapshot_id or f"snap-{uuid.uuid4().hex[:12]}"
         paths = paths or ["/workspace"]
+        # Include dependencies (node_modules, .venv) - only exclude caches
         exclude_patterns = exclude_patterns or [
-            "*.pyc", "__pycache__", ".git/objects",
-            "node_modules/.cache", "*.log", ".env", ".venv"
+            "*.pyc", "__pycache__",          # Python bytecode
+            ".git/objects", ".git/lfs",       # Git internals (keep .git for branch info)
+            "node_modules/.cache",            # npm/yarn cache (keep node_modules itself)
+            ".venv/lib/*/site-packages/*.dist-info",  # Keep packages, skip metadata
+            "*.log", "*.tmp", ".env",         # Logs, temp files, secrets
+            ".pytest_cache", ".mypy_cache",   # Tool caches
+            "coverage/", ".coverage",         # Coverage data
         ]
 
         # Build tar command with exclusions
@@ -1118,12 +1128,23 @@ spaces-bucket/
 ├── snapshots/
 │   ├── snap-abc123def456/
 │   │   ├── metadata.json      # SnapshotMetadata as JSON
-│   │   └── archive.tar.gz     # Compressed filesystem
+│   │   └── archive.tar.gz     # Compressed filesystem (includes deps)
 │   ├── hibernate-app123-1704672000/
 │   │   ├── metadata.json
 │   │   └── archive.tar.gz
 │   └── ...
 ```
+
+### Typical Snapshot Sizes (with dependencies)
+
+| Project Type | Uncompressed | Compressed (.tar.gz) | Restore Time |
+|--------------|--------------|----------------------|--------------|
+| Python (FastAPI + deps) | ~150MB | ~40MB | ~3-5s |
+| Python (ML/pandas/numpy) | ~800MB | ~200MB | ~10-15s |
+| Node (Express + deps) | ~100MB | ~25MB | ~2-4s |
+| Node (Next.js + deps) | ~400MB | ~100MB | ~8-12s |
+
+**Spaces storage cost**: ~$0.02/GB/month → typical snapshot costs < $0.01/month
 
 ---
 
