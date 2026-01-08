@@ -92,3 +92,66 @@ class WarmUpTimeoutError(PoolError):
     """Raised when warm_up() times out before pools reach target."""
 
     pass
+
+
+# Snapshot exceptions
+
+
+class SnapshotError(SandboxError):
+    """Base exception for snapshot-related errors."""
+
+    pass
+
+
+class SnapshotNotFoundError(SnapshotError):
+    """Raised when a snapshot with the given ID cannot be found."""
+
+    pass
+
+
+class SnapshotUploadError(SnapshotError):
+    """Raised when snapshot upload to Spaces fails."""
+
+    pass
+
+
+class SnapshotRestoreError(SnapshotError):
+    """Raised when snapshot restoration fails."""
+
+    pass
+
+
+# Service mode exceptions
+
+
+class ServiceModeError(SandboxError):
+    """Base exception for service mode errors."""
+
+    pass
+
+
+class ServiceNotAvailableError(ServiceModeError):
+    """Raised when service mode operation attempted on worker sandbox."""
+
+    pass
+
+
+class ServiceConnectionError(ServiceModeError):
+    """Raised when connection to sandbox service API fails."""
+
+    pass
+
+
+# Hibernation exceptions
+
+
+class HibernationError(SandboxError):
+    """Base exception for hibernation errors."""
+
+    pass
+
+
+class SandboxHibernatedError(HibernationError):
+    """Raised when operation attempted on hibernated sandbox."""
+
+    pass

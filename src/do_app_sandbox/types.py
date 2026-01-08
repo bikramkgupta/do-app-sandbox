@@ -1,7 +1,165 @@
 """Type definitions for the App Platform Sandbox SDK."""
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from enum import Enum
+from typing import Optional, Dict, Any, List, Literal
+
+
+# =============================================================================
+# Enums
+# =============================================================================
+
+
+class SandboxMode(Enum):
+    """Sandbox deployment mode."""
+
+    WORKER = "worker"  # Default: doctl console execution
+    SERVICE = "service"  # HTTP API with streaming support
+
+
+class SandboxState(Enum):
+    """Sandbox lifecycle states."""
+
+    CREATING = "creating"
+    ACTIVE = "active"
+    HIBERNATED = "hibernated"  # Snapshot exists, sandbox deleted
+    DELETED = "deleted"
+
+
+# =============================================================================
+# Configuration Types
+# =============================================================================
+
+
+@dataclass
+class ServiceConfig:
+    """Configuration for service mode sandboxes."""
+
+    api_port: int = 8080
+    proxy_ports: List[int] = field(default_factory=lambda: [3000, 5000, 8000])
+    enable_file_api: bool = True
+    enable_sessions: bool = True
+    token: Optional[str] = None  # Auto-generated if not provided
+
+    def __repr__(self) -> str:
+        return f"ServiceConfig(api_port={self.api_port}, proxy_ports={self.proxy_ports})"
+
+
+@dataclass
+class HibernationConfig:
+    """Configuration for sandbox hibernation (Cloudflare-aligned)."""
+
+    enabled: bool = True
+    sleep_after: int = 600  # Seconds of inactivity before hibernate (default: 10 min)
+
+    def __repr__(self) -> str:
+        return f"HibernationConfig(enabled={self.enabled}, sleep_after={self.sleep_after}s)"
+
+
+# =============================================================================
+# Streaming Types
+# =============================================================================
+
+
+@dataclass
+class StreamEvent:
+    """A single streaming output event from exec_stream()."""
+
+    type: str  # "stdout", "stderr", "exit", "error"
+    data: str
+    timestamp: float
+
+    @property
+    def is_output(self) -> bool:
+        """Returns True if this is stdout or stderr output."""
+        return self.type in ("stdout", "stderr")
+
+    @property
+    def is_complete(self) -> bool:
+        """Returns True if this is a terminal event (exit or error)."""
+        return self.type in ("exit", "error")
+
+    def __repr__(self) -> str:
+        preview = self.data[:50] if len(self.data) > 50 else self.data
+        return f"StreamEvent(type={self.type!r}, data={preview!r})"
+
+
+# =============================================================================
+# Snapshot Types
+# =============================================================================
+
+
+@dataclass
+class SnapshotMetadata:
+    """Metadata about a saved snapshot."""
+
+    snapshot_id: str
+    created_at: float
+    sandbox_image: str
+    size_bytes: int
+    paths: List[str]
+    description: Optional[str] = None
+    tags: Dict[str, str] = field(default_factory=dict)
+
+    def __repr__(self) -> str:
+        size_mb = self.size_bytes / (1024 * 1024)
+        return f"SnapshotMetadata(id={self.snapshot_id!r}, size={size_mb:.1f}MB)"
+
+
+@dataclass
+class HibernatedSandbox:
+    """Reference to a hibernated sandbox for later wake()."""
+
+    snapshot_id: str
+    image: str
+    mode: SandboxMode
+    service_config: Optional[ServiceConfig]
+    hibernated_at: float
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __repr__(self) -> str:
+        return f"HibernatedSandbox(snapshot={self.snapshot_id!r}, image={self.image!r})"
+
+
+# =============================================================================
+# Git Types
+# =============================================================================
+
+
+@dataclass
+class GitCredentials:
+    """Credentials for private repository access."""
+
+    username: Optional[str] = None
+    token: Optional[str] = None  # Personal Access Token for HTTPS
+    ssh_key: Optional[str] = None  # Private key content for SSH
+
+    def __repr__(self) -> str:
+        auth_type = "ssh" if self.ssh_key else "token" if self.token else "none"
+        return f"GitCredentials(type={auth_type})"
+
+
+# =============================================================================
+# Port Exposure Types
+# =============================================================================
+
+
+@dataclass
+class ExposedPort:
+    """Information about an exposed port with public URL."""
+
+    port: int
+    url: str
+    protocol: str = "https"  # "https" or "wss"
+    created_at: float = 0
+
+    def __repr__(self) -> str:
+        return f"ExposedPort(port={self.port}, url={self.url!r})"
+
+
+# =============================================================================
+# Existing Types (unchanged)
+# =============================================================================
 
 
 @dataclass
