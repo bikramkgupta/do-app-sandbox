@@ -1,244 +1,130 @@
-# Tests
+# App Platform Sandbox Testing Guide
 
-This directory contains all tests for the `do-app-sandbox` SDK. Tests are organized by type and purpose.
+This directory contains a comprehensive suite of tests for the `do-app-sandbox` SDK, ranging from unit tests to multi-hour stress tests.
 
-## Prerequisites
+## 🚀 Incremental Testing Strategy
 
-- **doctl** installed and authenticated (`doctl auth init`)
-- **Python 3.10+** with `uv` package manager
-- Optional: `.env` file at repo root for Spaces configuration
+To ensure stability and catch bugs early, follow this incremental testing path:
 
-## Directory Structure
-
-```
-tests/
-├── functional/          # End-to-end functional tests
-│   ├── run_all.py      # Test runner for all functional tests
-│   ├── test_01_existing_app.py  # Connect to existing apps
-│   ├── test_02_benchmark.py     # Sandbox creation benchmark
-│   ├── test_03_basic_sdk.py     # Core SDK functionality
-│   ├── test_04_manager.py       # SandboxManager tests
-│   └── results/        # JSON test results
-├── benchmarks/         # Performance benchmarks
-│   └── sandbox_create_benchmark.py
-├── smoke/              # Quick smoke tests
-│   └── main.py
-├── perf/               # Performance tests with large files
-│   └── main.py
-├── manager_stress/     # Stress tests for SandboxManager
-│   ├── __main__.py
-│   ├── orchestrator.py
-│   └── ...
-├── test_integration.py # Basic integration test (pytest)
-├── test_manager.py     # Unit tests for SandboxManager
-├── test_pty_leak.py    # PTY leak detection test
-├── presigned_url_check.py  # Spaces presigned URL probe
-└── artifacts/          # Test output artifacts
+### Step 1: Unit Tests (Fast, No Network)
+Validate internal logic, type safety, and state machine transitions using mocks.
+```bash
+uv run --extra dev pytest tests/unit/ -v
 ```
 
-## Quick Start
+### Step 2: Container API Tests (Local Docker)
+Validate the FastAPI `sandbox_api` server that runs inside "Service Mode" containers.
+1. Build and run the test container locally:
+   ```bash
+   docker build -t sandbox-api-test -f images/sandbox-python-service/Dockerfile images/
+   docker run -p 8080:8080 -e SANDBOX_API_TOKEN=test-token sandbox-api-test
+   ```
+2. Run the tests against the local container:
+   ```bash
+   SANDBOX_API_URL=http://localhost:8080 SANDBOX_API_TOKEN=test-token pytest tests/container/
+   ```
 
-### Run Functional Tests (Recommended)
+#### Running Against a Cloud Sandbox (Alternative)
+Container tests can also run against a deployed Service sandbox for true E2E validation through real DigitalOcean ingress/load balancers.
+
+1. Create a Service sandbox:
+   ```bash
+   sandbox create --image python --component-type service
+   ```
+   Note the URL (e.g., `https://my-sandbox-xxxxx.ondigitalocean.app`).
+
+2. Run tests targeting the cloud sandbox:
+   ```bash
+   export SANDBOX_API_URL="https://your-sandbox-url.ondigitalocean.app"
+   export SANDBOX_API_TOKEN="your-token-value"
+   uv run pytest tests/container/ -v
+   ```
+
+**Note:** Unit tests (`tests/unit/`) cannot run in the cloud - they test internal Python logic using mocks and must run locally.
+
+### Step 3: Functional & Integration Tests (Real Infrastructure)
+Validate end-to-end flows on DigitalOcean App Platform. Requires `DIGITALOCEAN_TOKEN` and Spaces configuration.
+```bash
+# Basic SDK lifecycle
+uv run python tests/functional/test_03_basic_sdk.py
+
+# Integration tests (Service mode, Snapshots, Hibernation)
+uv run --extra dev pytest tests/integration/ -v
+```
+
+### Step 4: Stress & Performance Tests
+Validate system behavior under heavy load and long durations.
+```bash
+# 10-minute smoke stress test
+uv run python -m tests.manager_stress --scenario quick_validation
+
+# 4-hour rigorous pool test (Hard Cap 25)
+uv run python -m tests.rigorous_pool_test.run_25cap_4hr
+```
+
+---
+
+## 🛠 Building Images for Testing
+
+Since GitHub Actions only run on the `main` branch, you must build and push images manually to test the new Service/Worker mode features.
+
+### Option 1: Push to DigitalOcean Container Registry (DOCR)
+Recommended for testing on App Platform.
+1. Login to your registry: `doctl registry login`
+2. Run the build script (updates coming soon) or use Docker:
+   ```bash
+   export REGISTRY="registry.digitalocean.com/your-registry"
+   docker build -t $REGISTRY/sandbox-python-service:latest -f images/sandbox-python-service/Dockerfile images/
+   docker push $REGISTRY/sandbox-python-service:latest
+   ```
+
+### Option 2: Use the Build Script
+Update your `.env` with `GHCR_OWNER` and use the provided script to build all images:
+```bash
+./scripts/build-ghcr.sh
+```
+
+---
+
+## 📂 Test Suites Reference
+
+| Directory | Type | Purpose |
+|-----------|------|---------|
+| `unit/` | Unit | Fast tests for types, logic, and mocks. |
+| `container/` | API | Validates the FastAPI agent inside the sandbox. |
+| `integration/` | E2E | Tests real DO/Spaces integration (Mode, Snapshots). |
+| `functional/` | E2E | High-level functional flow benchmarks. |
+| `manager_stress/` | Stress | Multi-user load simulation for SandboxManager. |
+| `manager_simulator/`| Algo | Accelerated algorithmic simulation (no cost). |
+| `rigorous_pool_test/`| Stress | 4-hour hard-cap capacity enforcement test. |
+
+---
+
+## ⚙️ Configuration
+
+Tests use environment variables defined in your `.env` file:
 
 ```bash
-# Run all functional tests
-uv run python tests/functional/run_all.py
+# DigitalOcean
+DIGITALOCEAN_TOKEN=dop_v1_...
+APP_SANDBOX_REGION=syd1
 
-# Run specific tests only
-uv run python tests/functional/run_all.py --only 3 4
-
-# Skip specific tests
-uv run python tests/functional/run_all.py --skip 2
-```
-
-### Run Individual Functional Tests
-
-```bash
-# Test 1: Connect to existing app
-uv run python tests/functional/test_01_existing_app.py <APP_ID> <COMPONENT>
-
-# Test 2: Benchmark (creates sandboxes)
-uv run python tests/functional/test_02_benchmark.py <COUNT> <CONCURRENT>
-
-# Test 3: Basic SDK (creates sandbox)
-uv run python tests/functional/test_03_basic_sdk.py <IMAGE>
-
-# Test 4: SandboxManager (no network)
-uv run python tests/functional/test_04_manager.py
-```
-
-### Run Unit Tests with pytest
-
-```bash
-uv run --extra dev pytest tests/test_manager.py -v
-uv run --extra dev pytest tests/test_integration.py -s
-```
-
-## Test Categories
-
-### 1. Functional Tests (`tests/functional/`)
-
-End-to-end tests that verify SDK functionality works correctly.
-
-| Test | Description | Creates Sandboxes | Duration |
-|------|-------------|-------------------|----------|
-| test_01 | Connect to existing app, run diagnostics | No | ~30s |
-| test_02 | Benchmark sandbox creation | Yes (4 default) | ~2-3min |
-| test_03 | Full SDK lifecycle (create, exec, files, delete) | Yes (1) | ~2min |
-| test_04 | SandboxManager pool management | No | <1s |
-
-### 2. Unit Tests (`test_manager.py`)
-
-Unit tests for `SandboxManager` with mocked dependencies. Fast, no network calls.
-
-```bash
-uv run --extra dev pytest tests/test_manager.py -v
-```
-
-### 3. Integration Tests (`test_integration.py`)
-
-Basic integration test that creates a real sandbox and tests core operations.
-
-```bash
-uv run --extra dev pytest tests/test_integration.py -s
-```
-
-### 4. Smoke Tests (`tests/smoke/`)
-
-Quick lifecycle tests for Python/Node images. Writes JSON results to `artifacts/`.
-
-```bash
-uv run --extra dev python -m tests.smoke.main --spaces
-```
-
-### 5. Performance Tests (`tests/perf/`)
-
-Extended tests including large file transfers via Spaces.
-
-```bash
-uv run --extra dev python -m tests.perf.main --spaces --run-large-file
-```
-
-### 6. Benchmarks (`tests/benchmarks/`)
-
-Full-scale benchmarks for sandbox creation performance.
-
-```bash
-uv run python tests/benchmarks/sandbox_create_benchmark.py
-```
-
-### 7. Stress Tests (`tests/manager_stress/`)
-
-Stress testing for SandboxManager under high load.
-
-```bash
-uv run python -m tests.manager_stress
-```
-
-## Environment Variables
-
-Optional environment variables for tests:
-
-```bash
-# Spaces configuration (for large file tests)
+# DigitalOcean Spaces (Required for Snapshots/Large Files)
+SPACES_BUCKET=your-bucket
+SPACES_REGION=nyc3
 SPACES_ACCESS_KEY=...
 SPACES_SECRET_KEY=...
-SPACES_BUCKET=...
-SPACES_REGION=nyc3
-SPACES_ENDPOINT=https://...
 
-# Image registry (defaults to GHCR)
-GHCR_OWNER=bikramkgupta
-GHCR_REGISTRY=ghcr.io
-
-# Default region
-APP_SANDBOX_REGION=atl1
-
-# Benchmark configuration
-BENCHMARK_COUNT=4
-BENCHMARK_CONCURRENT=2
+# Image Registry
+GHCR_OWNER=your-username
+APP_SANDBOX_REGISTRY=ghcr.io  # Or your DOCR host
 ```
 
-Load from `.env` file:
+---
 
-```bash
-set -a && source .env && set +a
-```
+## 📊 Results & Artifacts
 
-## Test Results
-
-Functional test results are saved to `tests/functional/results/`:
-
-- `test_01_result.json` - Existing app connection
-- `test_02_result.json` - Benchmark results
-- `test_03_result.json` - Basic SDK test results
-- `test_04_result.json` - SandboxManager test results
-- `summary.json` - Overall summary
-
-Smoke/perf results are saved to `tests/artifacts/`.
-
-## Writing New Tests
-
-### Functional Test Template
-
-```python
-#!/usr/bin/env python3
-"""Test description."""
-
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-
-from do_app_sandbox import Sandbox
-
-def main():
-    # Your test code
-    sandbox = Sandbox.create(image="python")
-    try:
-        result = sandbox.exec("echo hello")
-        assert result.success
-    finally:
-        sandbox.delete()
-    return 0
-
-if __name__ == "__main__":
-    sys.exit(main())
-```
-
-### Unit Test Template (pytest)
-
-```python
-import pytest
-from do_app_sandbox import SandboxManager, PoolConfig
-
-def test_pool_config_defaults():
-    config = PoolConfig()
-    assert config.max_ready == 10
-
-@pytest.mark.asyncio
-async def test_manager_lifecycle():
-    manager = SandboxManager()
-    await manager.start()
-    assert manager._started
-    await manager.shutdown()
-```
-
-## CI/CD Integration
-
-For CI pipelines, run the quick tests:
-
-```bash
-# Unit tests only (no network)
-uv run --extra dev pytest tests/test_manager.py -v
-
-# Functional test 4 only (no network)
-uv run python tests/functional/test_04_manager.py
-```
-
-For full integration testing:
-
-```bash
-# All functional tests
-uv run python tests/functional/run_all.py
-```
+Test results and reports are saved to `tests/artifacts/`:
+- **Stress Reports**: `tests/artifacts/stress/report_*.html`
+- **Pool Metrics**: `tests/artifacts/stress/metrics_*.csv`
+- **Rigorous Summary**: `tests/artifacts/rigorous_pool_test/*/summary.txt`
