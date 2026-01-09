@@ -183,6 +183,7 @@ class SandboxPool:
         # Background tasks
         self._replenish_task: Optional[asyncio.Task] = None
         self._health_task: Optional[asyncio.Task] = None
+        self._creation_tasks: set[asyncio.Task] = set()  # Track in-flight creation tasks
 
     @property
     def ready_count(self) -> int:
@@ -217,6 +218,7 @@ class SandboxPool:
     async def start(self) -> None:
         """Start background tasks for this pool."""
         self._shutdown = False
+        self._is_active = True  # Start active so pool pre-warms immediately
         self._replenish_task = asyncio.create_task(self._replenish_loop())
         if self.config.health_check_interval > 0:
             self._health_task = asyncio.create_task(self._health_check_loop())
@@ -240,7 +242,16 @@ class SandboxPool:
             except asyncio.CancelledError:
                 pass
 
-        # Destroy all pooled sandboxes
+        # Cancel in-flight creation tasks and wait for them to complete
+        # This ensures we don't wait indefinitely for long-running sandbox creations
+        if self._creation_tasks:
+            logger.debug(f"Cancelling {len(self._creation_tasks)} in-flight creation tasks")
+            for task in self._creation_tasks:
+                task.cancel()
+            # Wait for cancellation to complete - return_exceptions captures CancelledError
+            await asyncio.gather(*self._creation_tasks, return_exceptions=True)
+
+        # Destroy all pooled sandboxes (any that slipped through before shutdown flag was set)
         await self._drain_pool()
 
     async def _drain_pool(self) -> None:
@@ -283,20 +294,34 @@ class SandboxPool:
         if self.config.on_empty == "fail":
             raise PoolExhaustedError(f"Pool for image '{self.image}' is exhausted")
 
-        # Check global limit before on-demand creation
-        if self._total_limit_callback and self._total_limit_callback():
-            raise PoolExhaustedError(
-                f"Global sandbox limit reached, cannot create on-demand for {self.image}"
-            )
+        # CRITICAL: Pessimistic reservation for on-demand creation
+        # Atomically increment _creating_count and check limit under lock
+        # to prevent TOCTOU race condition
+        async with self._lock:
+            self._creating_count += 1
+            if self._total_limit_callback and self._total_limit_callback():
+                self._creating_count -= 1
+                raise PoolExhaustedError(
+                    f"Global sandbox limit reached, cannot create on-demand for {self.image}"
+                )
 
         # Fall back to cold start
         logger.info(f"Pool empty for {self.image}, creating sandbox on-demand")
-        sandbox = await self._create_sandbox_with_retry(timeout=timeout)
-        latency_ms = (time.time() - start_time) * 1000
-        self._record_acquire(from_pool=False, latency_ms=latency_ms)
-        sandbox._from_pool = False  # Mark for external tracking
-        self._in_use_count += 1  # Track in-use sandbox
-        return sandbox
+        try:
+            sandbox = await self._create_sandbox_no_counter(timeout=timeout)
+            # Atomically transition from creating to in_use
+            async with self._lock:
+                self._creating_count -= 1
+                self._in_use_count += 1
+            latency_ms = (time.time() - start_time) * 1000
+            self._record_acquire(from_pool=False, latency_ms=latency_ms)
+            sandbox._from_pool = False  # Mark for external tracking
+            return sandbox
+        except Exception:
+            # Creation failed - release the reserved slot
+            async with self._lock:
+                self._creating_count -= 1
+            raise
 
     def release(self, sandbox: Sandbox) -> None:
         """Release a sandbox back (decrement in-use count).
@@ -390,6 +415,52 @@ class SandboxPool:
             f"{self.config.create_retries} attempts: {last_error}"
         )
 
+    async def _create_sandbox_no_counter(
+        self, timeout: Optional[float] = None
+    ) -> Sandbox:
+        """Create a sandbox with retry logic, WITHOUT managing _creating_count.
+
+        This method is used when the caller manages _creating_count externally
+        to enable pessimistic reservation (increment before check) and prevent
+        TOCTOU race conditions.
+
+        Args:
+            timeout: Maximum time to wait for sandbox creation
+
+        Returns:
+            A ready Sandbox instance
+
+        Raises:
+            SandboxCreationError: If sandbox creation fails after all retries
+        """
+        last_error: Optional[Exception] = None
+
+        for attempt in range(self.config.create_retries):
+            try:
+                async with self._create_semaphore:
+                    sandbox = await asyncio.to_thread(
+                        Sandbox.create,
+                        image=self.image,
+                        wait_ready=True,
+                        timeout=timeout or 600,
+                        **self._sandbox_defaults,
+                    )
+                    return sandbox
+            except SandboxCreationError as e:
+                last_error = e
+                self._metrics.failed_creates += 1
+                logger.warning(
+                    f"Sandbox creation attempt {attempt + 1}/{self.config.create_retries} "
+                    f"failed for {self.image}: {e}"
+                )
+                if attempt < self.config.create_retries - 1:
+                    await asyncio.sleep(self.config.create_retry_delay)
+
+        raise SandboxCreationError(
+            f"Failed to create sandbox for {self.image} after "
+            f"{self.config.create_retries} attempts: {last_error}"
+        )
+
     async def _destroy_sandbox(self, sandbox: Sandbox) -> None:
         """Destroy a sandbox safely."""
         try:
@@ -416,30 +487,41 @@ class SandboxPool:
             await self._scale_down_one()
             return
 
-        # Check if we need to replenish
-        target = self.config.target_ready if self._is_active else 0
-        current = self.ready_count + self._creating_count
+        # CRITICAL: Hold lock while calculating AND reserving slots to prevent
+        # race condition where multiple replenish cycles spawn duplicate tasks.
+        # Without the lock, the gap between reading _creating_count and spawning
+        # tasks allows the next replenish cycle to see stale counts.
+        async with self._lock:
+            # Check if we need to replenish
+            target = self.config.target_ready if self._is_active else 0
+            current = self.ready_count + self._creating_count
 
-        if current >= target:
-            return
+            if current >= target:
+                return
 
-        # Check global limit
-        if self._total_limit_callback and self._total_limit_callback():
-            logger.debug(f"Global sandbox limit reached, not creating for {self.image}")
-            return
+            # Check global limit
+            if self._total_limit_callback and self._total_limit_callback():
+                logger.debug(f"Global sandbox limit reached, not creating for {self.image}")
+                return
 
-        # Check pool limit
-        if current >= self.config.max_ready:
-            return
+            # Check pool limit
+            if current >= self.config.max_ready:
+                return
 
-        # Calculate how many sandboxes to create
-        needed = target - current
-        available = self.config.max_ready - current
-        to_create = min(needed, available)
+            # Calculate how many sandboxes to create
+            needed = target - current
+            available = self.config.max_ready - current
+            to_create = min(needed, available)
 
-        # Start ALL needed creations at once (semaphore limits actual concurrency)
+            # Reserve slots BEFORE spawning tasks (pessimistic reservation)
+            # This ensures subsequent replenish cycles see accurate counts
+            self._creating_count += to_create
+
+        # Now spawn tasks outside the lock (they'll decrement when done)
         for _ in range(to_create):
-            asyncio.create_task(self._create_and_add_to_pool())
+            task = asyncio.create_task(self._create_and_add_to_pool_reserved())
+            self._creation_tasks.add(task)
+            task.add_done_callback(self._creation_tasks.discard)
             self._metrics.scale_up_events += 1
 
     async def _should_scale_down(self) -> bool:
@@ -485,15 +567,74 @@ class SandboxPool:
 
     async def _create_and_add_to_pool(self) -> None:
         """Create a sandbox and add it to the pool."""
+        # CRITICAL: Pessimistic reservation - increment BEFORE checking limit
+        # This prevents TOCTOU race condition where multiple tasks pass the
+        # limit check before any of them increment _creating_count.
+        # By incrementing first (under lock), each task sees its own increment
+        # reflected in the count when checking the limit.
+        async with self._lock:
+            self._creating_count += 1
+            if self._total_limit_callback and self._total_limit_callback():
+                self._creating_count -= 1
+                logger.debug(f"Global limit reached, skipping pool creation for {self.image}")
+                return
+
         try:
-            sandbox = await self._create_sandbox_with_retry()
-            if not self._shutdown:
+            sandbox = await self._create_sandbox_no_counter()
+            if self._shutdown:
+                # Shutdown triggered while we were creating - destroy immediately
+                # to avoid orphaned sandboxes that exist on DO but aren't tracked
+                logger.debug(f"Shutdown in progress, destroying just-created sandbox for {self.image}")
+                await self._destroy_sandbox(sandbox)
+            else:
                 await self._ready_queue.put(_PooledSandbox(sandbox=sandbox))
                 logger.debug(
                     f"Added sandbox to pool for {self.image}, now {self.ready_count} ready"
                 )
+        except asyncio.CancelledError:
+            # Task was cancelled during shutdown - this is expected
+            logger.debug(f"Sandbox creation cancelled for {self.image} (shutdown)")
+            raise  # Re-raise so gather with return_exceptions=True captures it
         except Exception as e:
             logger.error(f"Failed to create sandbox for pool {self.image}: {e}")
+        finally:
+            async with self._lock:
+                self._creating_count -= 1
+
+    async def _create_and_add_to_pool_reserved(self) -> None:
+        """Create a sandbox and add it to the pool (slot already reserved).
+
+        This method is used when _creating_count was already incremented by
+        the caller (e.g., _replenish_once with pessimistic reservation).
+        It only decrements on completion, never increments.
+        """
+        # Check global limit first (slot reserved, but global might have filled)
+        async with self._lock:
+            if self._total_limit_callback and self._total_limit_callback():
+                self._creating_count -= 1  # Release reserved slot
+                logger.debug(f"Global limit reached, releasing reserved slot for {self.image}")
+                return
+
+        try:
+            sandbox = await self._create_sandbox_no_counter()
+            if self._shutdown:
+                # Shutdown triggered while we were creating - destroy immediately
+                logger.debug(f"Shutdown in progress, destroying just-created sandbox for {self.image}")
+                await self._destroy_sandbox(sandbox)
+            else:
+                await self._ready_queue.put(_PooledSandbox(sandbox=sandbox))
+                logger.debug(
+                    f"Added sandbox to pool for {self.image}, now {self.ready_count} ready"
+                )
+        except asyncio.CancelledError:
+            # Task was cancelled during shutdown - this is expected
+            logger.debug(f"Sandbox creation cancelled for {self.image} (shutdown)")
+            raise  # Re-raise so gather with return_exceptions=True captures it
+        except Exception as e:
+            logger.error(f"Failed to create sandbox for pool {self.image}: {e}")
+        finally:
+            async with self._lock:
+                self._creating_count -= 1
 
     async def _health_check_loop(self) -> None:
         """Background task to check health of pooled sandboxes."""
