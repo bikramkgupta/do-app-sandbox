@@ -28,21 +28,25 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Default values
 BUILD_PYTHON=true
 BUILD_NODE=true
+BUILD_SERVICE=true
 BUILD_LATEST=true
 DRY_RUN=false
+REGISTRY_HOST="ghcr.io"
 
 usage() {
     cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Build and push sandbox images to GitHub Container Registry.
+Build and push sandbox images to a container registry.
 
 Options:
-    --owner OWNER       GitHub username/org for GHCR (overrides GHCR_OWNER)
-    --user USER         GitHub username for login (overrides GHCR_USER)
-    --pat PAT           Personal Access Token (overrides GHCR_PAT)
+    --registry HOST     Registry host (default: ghcr.io)
+    --owner OWNER       Image owner/namespace (overrides GHCR_OWNER)
+    --user USER         Username for login (overrides GHCR_USER)
+    --pat PAT           Personal Access Token / Password (overrides GHCR_PAT)
     --python-only       Only build Python images
     --node-only         Only build Node images
+    --no-service        Skip building service/worker specialized images
     --no-latest         Skip building 'latest' tags
     --dry-run           Show what would be built without pushing
     -h, --help          Show this help message
@@ -96,6 +100,10 @@ load_env() {
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --registry)
+                REGISTRY_HOST="$2"
+                shift 2
+                ;;
             --owner)
                 GHCR_OWNER="$2"
                 shift 2
@@ -110,10 +118,16 @@ parse_args() {
                 ;;
             --python-only)
                 BUILD_NODE=false
+                BUILD_SERVICE=false
                 shift
                 ;;
             --node-only)
                 BUILD_PYTHON=false
+                BUILD_SERVICE=false
+                shift
+                ;;
+            --no-service)
+                BUILD_SERVICE=false
                 shift
                 ;;
             --no-latest)
@@ -171,15 +185,15 @@ setup_buildx() {
     fi
 }
 
-# Login to GHCR
+# Login to registry
 docker_login() {
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "[DRY-RUN] Would login to ghcr.io as $GHCR_USER"
+        log_info "[DRY-RUN] Would login to $REGISTRY_HOST as $GHCR_USER"
         return
     fi
 
-    log_info "Logging in to ghcr.io as $GHCR_USER..."
-    echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+    log_info "Logging in to $REGISTRY_HOST as $GHCR_USER..."
+    echo "$GHCR_PAT" | docker login "$REGISTRY_HOST" -u "$GHCR_USER" --password-stdin
 }
 
 # Build and push a single image
@@ -188,7 +202,7 @@ build_image() {
     local tag="$2"
     local context="$3"
 
-    local full_tag="ghcr.io/$GHCR_OWNER/$tag"
+    local full_tag="$REGISTRY_HOST/$GHCR_OWNER/$tag"
 
     echo ""
     log_info "Building: $full_tag"
@@ -216,10 +230,11 @@ build_all() {
 
     echo ""
     echo "=========================================="
-    echo "  Building Sandbox Images for GHCR"
+    echo "  Building Sandbox Images"
     echo "=========================================="
-    echo "  Owner: $GHCR_OWNER"
-    echo "  User:  $GHCR_USER"
+    echo "  Registry: $REGISTRY_HOST"
+    echo "  Owner:    $GHCR_OWNER"
+    echo "  User:     $GHCR_USER"
     echo "=========================================="
     echo ""
 
@@ -267,25 +282,41 @@ build_all() {
         fi
     fi
 
+    # Specialized Service/Worker images
+    if [[ "$BUILD_SERVICE" == "true" ]]; then
+        log_info "Building Specialized Service/Worker images..."
+
+        # Python Service
+        build_image \
+            "$images_dir/sandbox-python-service/Dockerfile" \
+            "sandbox-python-service:latest" \
+            "$images_dir/"
+
+        # Python Worker
+        build_image \
+            "$images_dir/sandbox-python-worker/Dockerfile" \
+            "sandbox-python-worker:latest" \
+            "$images_dir/"
+
+        # Node Service
+        build_image \
+            "$images_dir/sandbox-node-service/Dockerfile" \
+            "sandbox-node-service:latest" \
+            "$images_dir/"
+
+        # Node Worker
+        build_image \
+            "$images_dir/sandbox-node-worker/Dockerfile" \
+            "sandbox-node-worker:latest" \
+            "$images_dir/"
+    fi
+
     echo ""
     echo "=========================================="
     log_info "All builds complete!"
     echo "=========================================="
     echo ""
-    log_info "Images pushed to:"
-    if [[ "$BUILD_PYTHON" == "true" ]]; then
-        echo "  - ghcr.io/$GHCR_OWNER/sandbox-python:python3.12"
-        echo "  - ghcr.io/$GHCR_OWNER/sandbox-python:python3.13"
-        [[ "$BUILD_LATEST" == "true" ]] && echo "  - ghcr.io/$GHCR_OWNER/sandbox-python:latest"
-    fi
-    if [[ "$BUILD_NODE" == "true" ]]; then
-        echo "  - ghcr.io/$GHCR_OWNER/sandbox-node:node22"
-        echo "  - ghcr.io/$GHCR_OWNER/sandbox-node:node24"
-        [[ "$BUILD_LATEST" == "true" ]] && echo "  - ghcr.io/$GHCR_OWNER/sandbox-node:latest"
-    fi
-    echo ""
-    log_warn "Remember to make packages PUBLIC in GitHub:"
-    echo "  https://github.com/$GHCR_OWNER?tab=packages"
+    log_info "Images pushed to $REGISTRY_HOST/$GHCR_OWNER"
 }
 
 # Main
