@@ -14,13 +14,13 @@ import json
 import time
 import uuid
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from .exceptions import (
     SnapshotError,
     SnapshotNotFoundError,
-    SnapshotUploadError,
     SnapshotRestoreError,
+    SnapshotUploadError,
     SpacesNotConfiguredError,
 )
 from .spaces import SpacesClient
@@ -83,11 +83,7 @@ class SnapshotManager:
         └── ...
     """
 
-    def __init__(
-        self,
-        spaces_config: Optional[SpacesConfig] = None,
-        prefix: str = DEFAULT_SNAPSHOT_PREFIX
-    ):
+    def __init__(self, spaces_config: SpacesConfig | None = None, prefix: str = DEFAULT_SNAPSHOT_PREFIX):
         """Initialize the snapshot manager.
 
         Args:
@@ -100,6 +96,7 @@ class SnapshotManager:
         """
         if spaces_config is None:
             from .spaces import create_spaces_config_from_env
+
             spaces_config = create_spaces_config_from_env()
             if spaces_config is None:
                 raise SpacesNotConfiguredError(
@@ -114,12 +111,12 @@ class SnapshotManager:
     def create_snapshot(
         self,
         sandbox: "Sandbox",
-        snapshot_id: Optional[str] = None,
-        paths: Optional[List[str]] = None,
-        exclude_patterns: Optional[List[str]] = None,
-        description: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
-        timeout: int = 600
+        snapshot_id: str | None = None,
+        paths: list[str] | None = None,
+        exclude_patterns: list[str] | None = None,
+        description: str | None = None,
+        tags: dict[str, str] | None = None,
+        timeout: int = 600,
     ) -> SnapshotMetadata:
         """Create a snapshot of sandbox filesystem.
 
@@ -168,19 +165,14 @@ class SnapshotManager:
 
         # Upload to Spaces using presigned URL
         spaces_key = f"{self._prefix}{snapshot_id}/archive.tar.gz"
-        upload_url = self._spaces.generate_presigned_upload_url(
-            spaces_key,
-            expires_in=3600
-        )
+        upload_url = self._spaces.generate_presigned_upload_url(spaces_key, expires_in=3600)
 
         # Use curl to upload from sandbox (sandbox uploads directly to Spaces)
         upload_cmd = f"curl -sSf -X PUT -T {archive} '{upload_url}'"
         upload_result = sandbox.exec(upload_cmd, timeout=timeout)
 
         if not upload_result.success:
-            raise SnapshotUploadError(
-                f"Failed to upload snapshot: {upload_result.stderr}"
-            )
+            raise SnapshotUploadError(f"Failed to upload snapshot: {upload_result.stderr}")
 
         # Create and save metadata
         metadata = SnapshotMetadata(
@@ -190,7 +182,7 @@ class SnapshotManager:
             size_bytes=size_bytes,
             paths=paths,
             description=description,
-            tags=tags or {}
+            tags=tags or {},
         )
         self._save_metadata(metadata)
 
@@ -200,11 +192,7 @@ class SnapshotManager:
         return metadata
 
     def restore_snapshot(
-        self,
-        sandbox: "Sandbox",
-        snapshot_id: str,
-        target_path: str = "/",
-        timeout: int = 600
+        self, sandbox: "Sandbox", snapshot_id: str, target_path: str = "/", timeout: int = 600
     ) -> bool:
         """Restore a snapshot to sandbox.
 
@@ -228,10 +216,7 @@ class SnapshotManager:
 
         # Download via presigned URL
         spaces_key = f"{self._prefix}{snapshot_id}/archive.tar.gz"
-        download_url = self._spaces.generate_presigned_download_url(
-            spaces_key,
-            expires_in=3600
-        )
+        download_url = self._spaces.generate_presigned_download_url(spaces_key, expires_in=3600)
         archive = f"/tmp/restore_{snapshot_id}.tar.gz"
 
         # Download in sandbox
@@ -239,25 +224,21 @@ class SnapshotManager:
         download_result = sandbox.exec(download_cmd, timeout=timeout)
 
         if not download_result.success:
-            raise SnapshotRestoreError(
-                f"Failed to download snapshot: {download_result.stderr}"
-            )
+            raise SnapshotRestoreError(f"Failed to download snapshot: {download_result.stderr}")
 
         # Extract archive
         extract_cmd = f"tar -xzf {archive} -C {target_path}"
         extract_result = sandbox.exec(extract_cmd, timeout=timeout)
 
         if not extract_result.success:
-            raise SnapshotRestoreError(
-                f"Failed to extract snapshot: {extract_result.stderr}"
-            )
+            raise SnapshotRestoreError(f"Failed to extract snapshot: {extract_result.stderr}")
 
         # Cleanup archive
         sandbox.exec(f"rm -f {archive}")
 
         return True
 
-    def get_snapshot(self, snapshot_id: str) -> Optional[SnapshotMetadata]:
+    def get_snapshot(self, snapshot_id: str) -> SnapshotMetadata | None:
         """Get snapshot metadata.
 
         Args:
@@ -276,10 +257,10 @@ class SnapshotManager:
 
     def list_snapshots(
         self,
-        prefix: Optional[str] = None,
-        image: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None
-    ) -> List[SnapshotMetadata]:
+        prefix: str | None = None,
+        image: str | None = None,
+        tags: dict[str, str] | None = None,
+    ) -> list[SnapshotMetadata]:
         """List all snapshots.
 
         Args:
@@ -307,10 +288,7 @@ class SnapshotManager:
                         if image and meta.sandbox_image != image:
                             continue
                         if tags:
-                            if not all(
-                                meta.tags.get(k) == v
-                                for k, v in tags.items()
-                            ):
+                            if not all(meta.tags.get(k) == v for k, v in tags.items()):
                                 continue
                         snapshots.append(meta)
 
@@ -354,11 +332,7 @@ class SnapshotManager:
         key = f"{self._prefix}{snapshot_id}/metadata.json"
         return self._spaces.object_exists(key)
 
-    def get_snapshot_download_url(
-        self,
-        snapshot_id: str,
-        expires_in: int = 3600
-    ) -> str:
+    def get_snapshot_download_url(self, snapshot_id: str, expires_in: int = 3600) -> str:
         """Get a presigned URL to download a snapshot archive.
 
         Args:
@@ -390,9 +364,9 @@ class SnapshotManager:
     def copy_snapshot(
         self,
         source_id: str,
-        target_id: Optional[str] = None,
-        description: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None
+        target_id: str | None = None,
+        description: str | None = None,
+        tags: dict[str, str] | None = None,
     ) -> SnapshotMetadata:
         """Create a copy of an existing snapshot.
 
@@ -421,7 +395,7 @@ class SnapshotManager:
         self._spaces.client.copy_object(
             Bucket=self._spaces.bucket,
             CopySource={"Bucket": self._spaces.bucket, "Key": source_key},
-            Key=target_key
+            Key=target_key,
         )
 
         # Create new metadata
@@ -433,7 +407,7 @@ class SnapshotManager:
             size_bytes=source.size_bytes,
             paths=source.paths,
             description=description or f"Copy of {source_id}",
-            tags=merged_tags
+            tags=merged_tags,
         )
         self._save_metadata(metadata)
 

@@ -3,20 +3,14 @@
 import pytest
 
 from do_app_sandbox.exceptions import (
-    # Base
-    SandboxError,
-    # Sandbox lifecycle
-    SandboxCreationError,
-    SandboxNotReadyError,
-    SandboxNotFoundError,
     # Command execution
     CommandExecutionError,
     CommandTimeoutError,
+    ConnectionError,
     # File operations
     FileOperationError,
-    ConnectionError,
-    # Spaces
-    SpacesNotConfiguredError,
+    # Hibernation
+    HibernationError,
     # Image validation
     ImageNotValidatedError,
     ImageValidationError,
@@ -24,19 +18,25 @@ from do_app_sandbox.exceptions import (
     PoolError,
     PoolExhaustedError,
     PoolShutdownError,
-    WarmUpTimeoutError,
-    # Snapshot
-    SnapshotError,
-    SnapshotNotFoundError,
-    SnapshotUploadError,
-    SnapshotRestoreError,
+    # Sandbox lifecycle
+    SandboxCreationError,
+    # Base
+    SandboxError,
+    SandboxHibernatedError,
+    SandboxNotFoundError,
+    SandboxNotReadyError,
+    ServiceConnectionError,
     # Service mode
     ServiceModeError,
     ServiceNotAvailableError,
-    ServiceConnectionError,
-    # Hibernation
-    HibernationError,
-    SandboxHibernatedError,
+    # Snapshot
+    SnapshotError,
+    SnapshotNotFoundError,
+    SnapshotRestoreError,
+    SnapshotUploadError,
+    # Spaces
+    SpacesNotConfiguredError,
+    WarmUpTimeoutError,
 )
 
 

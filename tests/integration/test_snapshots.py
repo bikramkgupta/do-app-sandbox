@@ -19,28 +19,19 @@ class TestSnapshotBasic:
     """Basic snapshot creation and restoration tests."""
 
     @pytest.mark.timeout(120)
-    def test_create_snapshot_basic(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_create_snapshot_basic(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """Create snapshot of /workspace (~30s)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import SnapshotMetadata
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         # Create some content
         sandbox.exec("echo 'test content' > /workspace/test.txt")
 
         # Create snapshot
-        metadata = sandbox.create_snapshot(
-            description="Test snapshot"
-        )
+        metadata = sandbox.create_snapshot(description="Test snapshot")
         cleanup_snapshots(metadata.snapshot_id)
 
         assert isinstance(metadata, SnapshotMetadata)
@@ -49,72 +40,46 @@ class TestSnapshotBasic:
         assert metadata.size_bytes > 0
 
     @pytest.mark.timeout(120)
-    def test_create_snapshot_custom_paths(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_create_snapshot_custom_paths(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """Snapshot with custom paths (~30s)."""
         from do_app_sandbox import Sandbox
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         # Create content in specific paths
         sandbox.exec("mkdir -p /workspace/src && echo 'code' > /workspace/src/main.py")
 
-        metadata = sandbox.create_snapshot(
-            paths=["/workspace/src"],
-            description="Source code only"
-        )
+        metadata = sandbox.create_snapshot(paths=["/workspace/src"], description="Source code only")
         cleanup_snapshots(metadata.snapshot_id)
 
         assert metadata.paths == ["/workspace/src"]
 
     @pytest.mark.timeout(180)
-    def test_create_snapshot_with_deps(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_create_snapshot_with_deps(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """Snapshot includes node_modules (~45s)."""
         from do_app_sandbox import Sandbox
 
-        sandbox = Sandbox.create(
-            image="node",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="node", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         # Install a small package
         sandbox.exec("cd /workspace && npm init -y && npm install is-odd")
 
         # Create snapshot
-        metadata = sandbox.create_snapshot(
-            description="With dependencies"
-        )
+        metadata = sandbox.create_snapshot(description="With dependencies")
         cleanup_snapshots(metadata.snapshot_id)
 
         # node_modules should be included (size should be > minimal)
         assert metadata.size_bytes > 1000  # Should be larger with deps
 
     @pytest.mark.timeout(30)
-    def test_snapshot_metadata_stored(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_snapshot_metadata_stored(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """Metadata retrievable from Spaces (~5s after creation)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.snapshot import SnapshotManager
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         metadata = sandbox.create_snapshot()
@@ -135,19 +100,12 @@ class TestSnapshotRestore:
     """Snapshot restoration tests."""
 
     @pytest.mark.timeout(180)
-    def test_restore_snapshot_basic(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_restore_snapshot_basic(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """Restore snapshot to new sandbox (~30s)."""
         from do_app_sandbox import Sandbox
 
         # Create first sandbox with content
-        sandbox1 = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox1 = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox1)
 
         sandbox1.exec("echo 'original content' > /workspace/data.txt")
@@ -155,31 +113,19 @@ class TestSnapshotRestore:
         cleanup_snapshots(metadata.snapshot_id)
 
         # Create second sandbox and restore
-        sandbox2 = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox2 = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox2)
 
         success = sandbox2.restore_snapshot(metadata.snapshot_id)
         assert success is True
 
     @pytest.mark.timeout(180)
-    def test_restore_preserves_files(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_restore_preserves_files(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """Restored files match original (~10s after restore)."""
         from do_app_sandbox import Sandbox
 
         # Create sandbox with specific content
-        sandbox1 = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox1 = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox1)
 
         test_content = "unique-test-content-12345"
@@ -188,12 +134,7 @@ class TestSnapshotRestore:
         cleanup_snapshots(metadata.snapshot_id)
 
         # Restore to new sandbox
-        sandbox2 = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox2 = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox2)
 
         sandbox2.restore_snapshot(metadata.snapshot_id)
@@ -209,19 +150,12 @@ class TestSnapshotList:
     """Snapshot listing and filtering tests."""
 
     @pytest.mark.timeout(30)
-    def test_list_snapshots(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_list_snapshots(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """List returns created snapshots (~5s)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.snapshot import SnapshotManager
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         # Create snapshot with unique prefix
@@ -236,19 +170,12 @@ class TestSnapshotList:
         assert any(s.snapshot_id == snapshot_id for s in snapshots)
 
     @pytest.mark.timeout(30)
-    def test_list_snapshots_filter_image(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_list_snapshots_filter_image(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """Filter snapshots by image (~5s)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.snapshot import SnapshotManager
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         metadata = sandbox.create_snapshot()
@@ -260,19 +187,12 @@ class TestSnapshotList:
         assert all(s.sandbox_image == "python" for s in python_snapshots)
 
     @pytest.mark.timeout(30)
-    def test_delete_snapshot(
-        self, do_token, spaces_config, cleanup_sandboxes
-    ):
+    def test_delete_snapshot(self, do_token, spaces_config, cleanup_sandboxes):
         """Delete removes from Spaces (~5s)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.snapshot import SnapshotManager
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         metadata = sandbox.create_snapshot()
@@ -299,8 +219,8 @@ class TestSnapshotErrors:
     @pytest.mark.timeout(10)
     def test_snapshot_not_found(self, spaces_config):
         """Restore non-existent raises error (~2s)."""
-        from do_app_sandbox.snapshot import SnapshotManager
         from do_app_sandbox.exceptions import SnapshotNotFoundError
+        from do_app_sandbox.snapshot import SnapshotManager
 
         manager = SnapshotManager(spaces_config=spaces_config)
 

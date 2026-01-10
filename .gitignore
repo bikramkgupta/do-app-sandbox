@@ -18,12 +18,15 @@ ENV/
 
 # Testing
 .pytest_cache/
-tests/artifacts/*.log
-tests/artifacts/*.log.*
-tests/artifacts/*.txt
-tests/artifacts/*.json
-tests/artifacts/stress/
+tests/artifacts/
 !tests/artifacts/.gitkeep
+tests/functional/results/
+
+# Type checking
+.mypy_cache/
+
+# Pre-commit
+.pre-commit-cache/
 
 # Stress test execution programs (generated)
 sandbox-execution-programs/

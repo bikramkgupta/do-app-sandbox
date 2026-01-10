@@ -1,17 +1,16 @@
 """Tests for sandbox.py - Sandbox State Machine Tests."""
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
+from do_app_sandbox.exceptions import SandboxHibernatedError
 from do_app_sandbox.types import (
+    HibernationConfig,
     SandboxMode,
     SandboxState,
-    HibernationConfig,
-    ServiceConfig,
 )
-from do_app_sandbox.exceptions import SandboxHibernatedError
 
 
 class TestInitialState:
@@ -23,10 +22,7 @@ class TestInitialState:
             with patch("do_app_sandbox.sandbox.Executor"):
                 from do_app_sandbox.sandbox import Sandbox
 
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    component="sandbox"
-                )
+                sandbox = Sandbox(app_id="test-app-123", component="sandbox")
 
                 assert sandbox._state == SandboxState.ACTIVE
 
@@ -46,11 +42,7 @@ class TestInitialState:
             with patch("do_app_sandbox.sandbox.Executor"):
                 from do_app_sandbox.sandbox import Sandbox
 
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _mode=SandboxMode.SERVICE,
-                    _service_token="test-token"
-                )
+                sandbox = Sandbox(app_id="test-app-123", _mode=SandboxMode.SERVICE, _service_token="test-token")
 
                 assert sandbox._mode == SandboxMode.SERVICE
 
@@ -95,10 +87,7 @@ class TestIdleDetection:
                 from do_app_sandbox.sandbox import Sandbox
 
                 config = HibernationConfig(sleep_after=1)  # 1 second
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _hibernation_config=config
-                )
+                sandbox = Sandbox(app_id="test-app-123", _hibernation_config=config)
 
                 # Initially not idle
                 assert sandbox._is_idle() is False
@@ -115,10 +104,7 @@ class TestIdleDetection:
                 from do_app_sandbox.sandbox import Sandbox
 
                 config = HibernationConfig(sleep_after=1)
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _hibernation_config=config
-                )
+                sandbox = Sandbox(app_id="test-app-123", _hibernation_config=config)
 
                 # Simulate old last_activity but active stream
                 sandbox._last_activity = time.time() - 10
@@ -133,10 +119,7 @@ class TestIdleDetection:
                 from do_app_sandbox.sandbox import Sandbox
 
                 config = HibernationConfig(sleep_after=600)  # 10 minutes
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _hibernation_config=config
-                )
+                sandbox = Sandbox(app_id="test-app-123", _hibernation_config=config)
 
                 sandbox._record_activity()
 
@@ -180,10 +163,7 @@ class TestModeProperty:
             with patch("do_app_sandbox.sandbox.Executor"):
                 from do_app_sandbox.sandbox import Sandbox
 
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _mode=SandboxMode.WORKER
-                )
+                sandbox = Sandbox(app_id="test-app-123", _mode=SandboxMode.WORKER)
 
                 assert sandbox.mode == SandboxMode.WORKER
 
@@ -193,11 +173,7 @@ class TestModeProperty:
             with patch("do_app_sandbox.sandbox.Executor"):
                 from do_app_sandbox.sandbox import Sandbox
 
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _mode=SandboxMode.SERVICE,
-                    _service_token="token"
-                )
+                sandbox = Sandbox(app_id="test-app-123", _mode=SandboxMode.SERVICE, _service_token="token")
 
                 assert sandbox.mode == SandboxMode.SERVICE
 
@@ -236,10 +212,7 @@ class TestImageProperty:
             with patch("do_app_sandbox.sandbox.Executor"):
                 from do_app_sandbox.sandbox import Sandbox
 
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _image="python"
-                )
+                sandbox = Sandbox(app_id="test-app-123", _image="python")
 
                 assert sandbox.image == "python"
 
@@ -249,10 +222,7 @@ class TestImageProperty:
             with patch("do_app_sandbox.sandbox.Executor"):
                 from do_app_sandbox.sandbox import Sandbox
 
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _image="node"
-                )
+                sandbox = Sandbox(app_id="test-app-123", _image="node")
 
                 assert sandbox.image == "node"
 
@@ -278,10 +248,7 @@ class TestHibernationConfigDefault:
                 from do_app_sandbox.sandbox import Sandbox
 
                 config = HibernationConfig(enabled=False, sleep_after=300)
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _hibernation_config=config
-                )
+                sandbox = Sandbox(app_id="test-app-123", _hibernation_config=config)
 
                 assert sandbox._hibernation_config.enabled is False
                 assert sandbox._hibernation_config.sleep_after == 300
@@ -296,10 +263,7 @@ class TestServiceClient:
             with patch("do_app_sandbox.sandbox.Executor"):
                 from do_app_sandbox.sandbox import Sandbox
 
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _mode=SandboxMode.WORKER
-                )
+                sandbox = Sandbox(app_id="test-app-123", _mode=SandboxMode.WORKER)
 
                 assert sandbox._service_client is None
 
@@ -309,11 +273,7 @@ class TestServiceClient:
             with patch("do_app_sandbox.sandbox.Executor"):
                 from do_app_sandbox.sandbox import Sandbox
 
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _mode=SandboxMode.SERVICE,
-                    _service_token="token"
-                )
+                sandbox = Sandbox(app_id="test-app-123", _mode=SandboxMode.SERVICE, _service_token="token")
 
                 assert sandbox._executor is None
 
@@ -338,11 +298,7 @@ class TestSandboxRepr:
             with patch("do_app_sandbox.sandbox.Executor"):
                 from do_app_sandbox.sandbox import Sandbox
 
-                sandbox = Sandbox(
-                    app_id="test-app-123",
-                    _mode=SandboxMode.SERVICE,
-                    _service_token="token"
-                )
+                sandbox = Sandbox(app_id="test-app-123", _mode=SandboxMode.SERVICE, _service_token="token")
                 repr_str = repr(sandbox)
 
                 assert "service" in repr_str

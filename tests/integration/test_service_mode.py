@@ -27,7 +27,7 @@ class TestServiceModeSandbox:
             mode=SandboxMode.SERVICE,
             api_token=do_token,
             wait_ready=True,
-            timeout=300
+            timeout=300,
         )
         cleanup_sandboxes(sandbox)
 
@@ -41,12 +41,7 @@ class TestServiceModeSandbox:
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import SandboxMode
 
-        sandbox = Sandbox.create(
-            image="python",
-            mode=SandboxMode.SERVICE,
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", mode=SandboxMode.SERVICE, api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         result = sandbox.exec("echo 'hello from service mode'")
@@ -60,12 +55,7 @@ class TestServiceModeSandbox:
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import SandboxMode, StreamEvent
 
-        sandbox = Sandbox.create(
-            image="python",
-            mode=SandboxMode.SERVICE,
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", mode=SandboxMode.SERVICE, api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         events = list(sandbox.exec_stream("echo 'streaming test'"))
@@ -84,18 +74,11 @@ class TestServiceModeSandbox:
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import SandboxMode
 
-        sandbox = Sandbox.create(
-            image="python",
-            mode=SandboxMode.SERVICE,
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", mode=SandboxMode.SERVICE, api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         # Command that writes to both stdout and stderr
-        events = list(sandbox.exec_stream(
-            "echo 'stdout message' && echo 'stderr message' >&2"
-        ))
+        events = list(sandbox.exec_stream("echo 'stdout message' && echo 'stderr message' >&2"))
 
         # Collect event types
         types = set(e.type for e in events)
@@ -108,12 +91,7 @@ class TestServiceModeSandbox:
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import SandboxMode
 
-        sandbox = Sandbox.create(
-            image="python",
-            mode=SandboxMode.SERVICE,
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", mode=SandboxMode.SERVICE, api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         client = sandbox._get_service_client()
@@ -128,12 +106,7 @@ class TestServiceModeSandbox:
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import SandboxMode
 
-        sandbox = Sandbox.create(
-            image="python",
-            mode=SandboxMode.SERVICE,
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", mode=SandboxMode.SERVICE, api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         client = sandbox._get_service_client()
@@ -151,14 +124,9 @@ class TestServiceModeSandbox:
     def test_service_mode_port_exposure(self, do_token, cleanup_sandboxes):
         """expose_port() returns valid URL (~2s)."""
         from do_app_sandbox import Sandbox
-        from do_app_sandbox.types import SandboxMode, ExposedPort
+        from do_app_sandbox.types import ExposedPort, SandboxMode
 
-        sandbox = Sandbox.create(
-            image="python",
-            mode=SandboxMode.SERVICE,
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", mode=SandboxMode.SERVICE, api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         port_info = sandbox.expose_port(3000)
@@ -174,12 +142,7 @@ class TestServiceModeSandbox:
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import SandboxMode
 
-        sandbox = Sandbox.create(
-            image="python",
-            mode=SandboxMode.SERVICE,
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", mode=SandboxMode.SERVICE, api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         # Start a simple HTTP server
@@ -191,11 +154,12 @@ class TestServiceModeSandbox:
 
         # Try to access it (this tests the proxy functionality)
         import httpx
+
         try:
             response = httpx.get(
                 port_info.url,
                 headers={"Authorization": f"Bearer {sandbox._service_token}"},
-                timeout=10.0
+                timeout=10.0,
             )
             # Should get some response (could be 200 or 502 if server not ready)
             assert response.status_code in (200, 404, 502)
@@ -209,21 +173,13 @@ class TestServiceModeSandbox:
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import SandboxMode
 
-        sandbox = Sandbox.create(
-            image="python",
-            mode=SandboxMode.SERVICE,
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", mode=SandboxMode.SERVICE, api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         client = sandbox._get_service_client()
 
         # Create session
-        session_info = client.create_session(
-            session_id="test-session",
-            cwd="/workspace"
-        )
+        session_info = client.create_session(session_id="test-session", cwd="/workspace")
         assert session_info["session_id"] == "test-session"
 
         # Execute in session

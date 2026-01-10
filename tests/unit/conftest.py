@@ -15,12 +15,8 @@ sys.path.insert(0, str(src_path))
 def mock_spaces_config():
     """Create a mock SpacesConfig."""
     from do_app_sandbox.types import SpacesConfig
-    return SpacesConfig(
-        bucket="test-bucket",
-        region="nyc3",
-        access_key="test-key",
-        secret_key="test-secret"
-    )
+
+    return SpacesConfig(bucket="test-bucket", region="nyc3", access_key="test-key", secret_key="test-secret")
 
 
 @pytest.fixture
@@ -38,11 +34,7 @@ def mock_doctl():
     """Mock doctl subprocess calls."""
     with pytest.MonkeyPatch().context() as mp:
         mock_run = MagicMock()
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="{}",
-            stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
         mp.setattr("subprocess.run", mock_run)
         yield mock_run
 
@@ -51,7 +43,9 @@ def mock_doctl():
 def sample_snapshot_metadata():
     """Create sample SnapshotMetadata."""
     import time
+
     from do_app_sandbox.types import SnapshotMetadata
+
     return SnapshotMetadata(
         snapshot_id="snap-test123",
         created_at=time.time(),
@@ -59,7 +53,7 @@ def sample_snapshot_metadata():
         size_bytes=1024 * 1024,
         paths=["/workspace"],
         description="Test snapshot",
-        tags={"env": "test"}
+        tags={"env": "test"},
     )
 
 
@@ -67,12 +61,14 @@ def sample_snapshot_metadata():
 def sample_hibernated_sandbox():
     """Create sample HibernatedSandbox."""
     import time
+
     from do_app_sandbox.types import HibernatedSandbox, SandboxMode
+
     return HibernatedSandbox(
         snapshot_id="hibernate-test",
         image="python",
         mode=SandboxMode.WORKER,
         service_config=None,
         hibernated_at=time.time(),
-        metadata={"app_id": "old-app-123"}
+        metadata={"app_id": "old-app-123"},
     )

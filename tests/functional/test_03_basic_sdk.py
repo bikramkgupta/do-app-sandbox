@@ -10,13 +10,12 @@ Tests the core SDK features:
 - Delete sandbox
 """
 
-import sys
-import os
 import json
+import os
+import sys
 import time
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, List
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
@@ -26,25 +25,27 @@ from do_app_sandbox import Sandbox
 @dataclass
 class TestCase:
     """Individual test case result."""
+
     name: str
     passed: bool
     duration_s: float = 0.0
     details: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class TestResult:
     """Overall test result."""
+
     test_name: str = "Basic Sandbox SDK"
-    app_id: Optional[str] = None
-    url: Optional[str] = None
+    app_id: str | None = None
+    url: str | None = None
     image: str = "python"
     total_tests: int = 0
     passed: int = 0
     failed: int = 0
     duration_s: float = 0.0
-    test_cases: List[dict] = field(default_factory=list)
+    test_cases: list[dict] = field(default_factory=list)
     timestamp: str = ""
 
 
@@ -88,12 +89,15 @@ def run_tests(image: str = "python") -> TestResult:
     try:
         # Test 1: Create sandbox
         print("\n[1/10] Creating sandbox...")
-        tc = run_test_case("create_sandbox", lambda: Sandbox.create(
-            image=image,
-            name=f"func-test-{int(time.time())}",
-            wait_ready=True,
-            timeout=300,
-        ))
+        tc = run_test_case(
+            "create_sandbox",
+            lambda: Sandbox.create(
+                image=image,
+                name=f"func-test-{int(time.time())}",
+                wait_ready=True,
+                timeout=300,
+            ),
+        )
         if tc.passed:
             sandbox = tc.details if isinstance(tc.details, Sandbox) else None
             # Re-run to get sandbox object
@@ -147,9 +151,7 @@ def run_tests(image: str = "python") -> TestResult:
         # Test 5: Write file
         print("\n[5/10] Testing write_file...")
         test_content = "Hello from functional test!"
-        tc = run_test_case("write_file", lambda: sandbox.filesystem.write_file(
-            "/tmp/test.txt", test_content
-        ))
+        tc = run_test_case("write_file", lambda: sandbox.filesystem.write_file("/tmp/test.txt", test_content))
         test_cases.append(tc)
         print(f"  {'PASS' if tc.passed else 'FAIL'}: {tc.details or tc.error}")
 

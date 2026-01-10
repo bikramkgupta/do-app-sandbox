@@ -19,20 +19,13 @@ class TestHibernate:
     """Hibernation operation tests."""
 
     @pytest.mark.timeout(180)
-    def test_hibernate_creates_snapshot(
-        self, do_token, spaces_config, cleanup_snapshots
-    ):
+    def test_hibernate_creates_snapshot(self, do_token, spaces_config, cleanup_snapshots):
         """hibernate() creates snapshot (~45s)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.snapshot import SnapshotManager
         from do_app_sandbox.types import HibernatedSandbox
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
 
         # Create some state
         sandbox.exec("echo 'hibernation test' > /workspace/state.txt")
@@ -49,19 +42,12 @@ class TestHibernate:
         assert manager.snapshot_exists(hibernated.snapshot_id)
 
     @pytest.mark.timeout(180)
-    def test_hibernate_deletes_sandbox(
-        self, do_token, spaces_config, cleanup_snapshots
-    ):
+    def test_hibernate_deletes_sandbox(self, do_token, spaces_config, cleanup_snapshots):
         """hibernate() deletes the app (~10s after hibernate)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.exceptions import SandboxNotFoundError
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         app_id = sandbox.app_id
 
         hibernated = sandbox.hibernate()
@@ -72,19 +58,12 @@ class TestHibernate:
             Sandbox.get_from_id(app_id, api_token=do_token)
 
     @pytest.mark.timeout(30)
-    def test_hibernate_returns_reference(
-        self, do_token, spaces_config, cleanup_snapshots
-    ):
+    def test_hibernate_returns_reference(self, do_token, spaces_config, cleanup_snapshots):
         """Returns HibernatedSandbox (~2s verification)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import HibernatedSandbox, SandboxMode
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
 
         hibernated = sandbox.hibernate()
         cleanup_snapshots(hibernated.snapshot_id)
@@ -101,63 +80,41 @@ class TestWake:
     """Wake operation tests."""
 
     @pytest.mark.timeout(300)
-    def test_wake_creates_new_sandbox(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_wake_creates_new_sandbox(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """wake() creates new sandbox (~60s)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import SandboxState
 
         # Create and hibernate
-        sandbox1 = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox1 = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         sandbox1.exec("echo 'wake test' > /workspace/wake.txt")
 
         hibernated = sandbox1.hibernate()
         cleanup_snapshots(hibernated.snapshot_id)
 
         # Wake - creates new sandbox
-        sandbox2 = Sandbox.wake(
-            hibernated,
-            api_token=do_token,
-            spaces_config=spaces_config
-        )
+        sandbox2 = Sandbox.wake(hibernated, api_token=do_token, spaces_config=spaces_config)
         cleanup_sandboxes(sandbox2)
 
         assert sandbox2.app_id != sandbox1.app_id  # Different app
         assert sandbox2.state == SandboxState.ACTIVE
 
     @pytest.mark.timeout(300)
-    def test_wake_restores_state(
-        self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots
-    ):
+    def test_wake_restores_state(self, do_token, spaces_config, cleanup_sandboxes, cleanup_snapshots):
         """wake() restores files (~30s verification)."""
         from do_app_sandbox import Sandbox
 
         unique_content = f"unique-{int(time.time())}"
 
         # Create and hibernate
-        sandbox1 = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox1 = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
         sandbox1.exec(f"echo '{unique_content}' > /workspace/restore-test.txt")
 
         hibernated = sandbox1.hibernate()
         cleanup_snapshots(hibernated.snapshot_id)
 
         # Wake
-        sandbox2 = Sandbox.wake(
-            hibernated,
-            api_token=do_token,
-            spaces_config=spaces_config
-        )
+        sandbox2 = Sandbox.wake(hibernated, api_token=do_token, spaces_config=spaces_config)
         cleanup_sandboxes(sandbox2)
 
         # Verify content restored
@@ -171,19 +128,12 @@ class TestHibernationErrors:
     """Hibernation error handling tests."""
 
     @pytest.mark.timeout(30)
-    def test_double_hibernate_error(
-        self, do_token, spaces_config, cleanup_snapshots
-    ):
+    def test_double_hibernate_error(self, do_token, spaces_config, cleanup_snapshots):
         """Can't hibernate twice (~2s)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.exceptions import SandboxHibernatedError
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
 
         hibernated = sandbox.hibernate()
         cleanup_snapshots(hibernated.snapshot_id)
@@ -193,19 +143,12 @@ class TestHibernationErrors:
             sandbox.hibernate()
 
     @pytest.mark.timeout(30)
-    def test_exec_on_hibernated_error(
-        self, do_token, spaces_config, cleanup_snapshots
-    ):
+    def test_exec_on_hibernated_error(self, do_token, spaces_config, cleanup_snapshots):
         """exec() on hibernated raises (~2s)."""
         from do_app_sandbox import Sandbox
         from do_app_sandbox.exceptions import SandboxHibernatedError
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            spaces_config=spaces_config,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
 
         hibernated = sandbox.hibernate()
         cleanup_snapshots(hibernated.snapshot_id)

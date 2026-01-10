@@ -22,9 +22,7 @@ sys.path.insert(0, str(src_path))
 
 def pytest_configure(config):
     """Register custom markers."""
-    config.addinivalue_line(
-        "markers", "integration: mark test as integration test requiring real credentials"
-    )
+    config.addinivalue_line("markers", "integration: mark test as integration test requiring real credentials")
 
 
 def has_do_credentials() -> bool:
@@ -34,28 +32,24 @@ def has_do_credentials() -> bool:
 
 def has_spaces_credentials() -> bool:
     """Check if Spaces credentials are available."""
-    return all([
-        os.environ.get("SPACES_BUCKET"),
-        os.environ.get("SPACES_REGION"),
-        os.environ.get("SPACES_ACCESS_KEY"),
-        os.environ.get("SPACES_SECRET_KEY"),
-    ])
+    return all(
+        [
+            os.environ.get("SPACES_BUCKET"),
+            os.environ.get("SPACES_REGION"),
+            os.environ.get("SPACES_ACCESS_KEY"),
+            os.environ.get("SPACES_SECRET_KEY"),
+        ]
+    )
 
 
 # Skip markers for missing credentials
-requires_do_token = pytest.mark.skipif(
-    not has_do_credentials(),
-    reason="DIGITALOCEAN_TOKEN not set"
-)
+requires_do_token = pytest.mark.skipif(not has_do_credentials(), reason="DIGITALOCEAN_TOKEN not set")
 
-requires_spaces = pytest.mark.skipif(
-    not has_spaces_credentials(),
-    reason="Spaces credentials not configured"
-)
+requires_spaces = pytest.mark.skipif(not has_spaces_credentials(), reason="Spaces credentials not configured")
 
 requires_all_credentials = pytest.mark.skipif(
     not (has_do_credentials() and has_spaces_credentials()),
-    reason="Full credentials not configured"
+    reason="Full credentials not configured",
 )
 
 
@@ -81,12 +75,7 @@ def spaces_config():
     if not all([bucket, region, access_key, secret_key]):
         pytest.skip("Spaces credentials not configured")
 
-    return SpacesConfig(
-        bucket=bucket,
-        region=region,
-        access_key=access_key,
-        secret_key=secret_key
-    )
+    return SpacesConfig(bucket=bucket, region=region, access_key=access_key, secret_key=secret_key)
 
 
 @pytest.fixture

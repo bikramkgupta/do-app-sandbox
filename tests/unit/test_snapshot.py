@@ -7,11 +7,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from do_app_sandbox.types import SnapshotMetadata, SpacesConfig
 from do_app_sandbox.exceptions import (
-    SpacesNotConfiguredError,
     SnapshotNotFoundError,
+    SpacesNotConfiguredError,
 )
+from do_app_sandbox.types import SnapshotMetadata, SpacesConfig
 
 
 class TestSnapshotIdGeneration:
@@ -72,7 +72,6 @@ class TestTarCommandBuilding:
 
     def test_builds_correct_tar_command(self):
         """Builds correct tar command with exclusions."""
-        from do_app_sandbox.snapshot import DEFAULT_EXCLUDE_PATTERNS
 
         # Simulate the command building logic
         exclude_patterns = ["*.pyc", "__pycache__", ".env"]
@@ -116,7 +115,7 @@ class TestMetadataSerialization:
             size_bytes=1024 * 1024,
             paths=["/workspace"],
             description="Test snapshot",
-            tags={"env": "production", "version": "1.0"}
+            tags={"env": "production", "version": "1.0"},
         )
 
         json_str = json.dumps(asdict(metadata), indent=2)
@@ -140,7 +139,7 @@ class TestMetadataSerialization:
             "size_bytes": 2048,
             "paths": ["/app", "/data"],
             "description": "Node snapshot",
-            "tags": {}
+            "tags": {},
         }
 
         metadata = SnapshotMetadata(**json_data)
@@ -188,21 +187,21 @@ class TestListSnapshotsFiltering:
                 created_at=time.time(),
                 sandbox_image="python",
                 size_bytes=1024,
-                paths=["/workspace"]
+                paths=["/workspace"],
             ),
             SnapshotMetadata(
                 snapshot_id="snap-2",
                 created_at=time.time(),
                 sandbox_image="node",
                 size_bytes=2048,
-                paths=["/workspace"]
+                paths=["/workspace"],
             ),
             SnapshotMetadata(
                 snapshot_id="snap-3",
                 created_at=time.time(),
                 sandbox_image="python",
                 size_bytes=3072,
-                paths=["/workspace"]
+                paths=["/workspace"],
             ),
         ]
 
@@ -221,7 +220,7 @@ class TestListSnapshotsFiltering:
                 sandbox_image="python",
                 size_bytes=1024,
                 paths=["/workspace"],
-                tags={"env": "prod", "team": "backend"}
+                tags={"env": "prod", "team": "backend"},
             ),
             SnapshotMetadata(
                 snapshot_id="snap-2",
@@ -229,16 +228,13 @@ class TestListSnapshotsFiltering:
                 sandbox_image="python",
                 size_bytes=2048,
                 paths=["/workspace"],
-                tags={"env": "dev", "team": "frontend"}
+                tags={"env": "dev", "team": "frontend"},
             ),
         ]
 
         # Filter by tag
         filter_tags = {"env": "prod"}
-        filtered = [
-            s for s in snapshots
-            if all(s.tags.get(k) == v for k, v in filter_tags.items())
-        ]
+        filtered = [s for s in snapshots if all(s.tags.get(k) == v for k, v in filter_tags.items())]
 
         assert len(filtered) == 1
         assert filtered[0].snapshot_id == "snap-1"
@@ -252,21 +248,21 @@ class TestListSnapshotsFiltering:
                 created_at=now - 3600,
                 sandbox_image="python",
                 size_bytes=1024,
-                paths=["/workspace"]
+                paths=["/workspace"],
             ),
             SnapshotMetadata(
                 snapshot_id="snap-new",
                 created_at=now,
                 sandbox_image="python",
                 size_bytes=1024,
-                paths=["/workspace"]
+                paths=["/workspace"],
             ),
             SnapshotMetadata(
                 snapshot_id="snap-mid",
                 created_at=now - 1800,
                 sandbox_image="python",
                 size_bytes=1024,
-                paths=["/workspace"]
+                paths=["/workspace"],
             ),
         ]
 
@@ -288,34 +284,27 @@ class TestSnapshotManagerInit:
 
                 with pytest.raises(SpacesNotConfiguredError):
                     from do_app_sandbox.snapshot import SnapshotManager
+
                     SnapshotManager()
 
     def test_accepts_spaces_config(self):
         """Accepts SpacesConfig parameter."""
-        config = SpacesConfig(
-            bucket="test-bucket",
-            region="nyc3",
-            access_key="key",
-            secret_key="secret"
-        )
+        config = SpacesConfig(bucket="test-bucket", region="nyc3", access_key="key", secret_key="secret")
 
         with patch("do_app_sandbox.snapshot.SpacesClient"):
             from do_app_sandbox.snapshot import SnapshotManager
+
             manager = SnapshotManager(spaces_config=config)
 
             assert manager._prefix == "snapshots/"
 
     def test_custom_prefix(self):
         """Custom prefix is normalized correctly."""
-        config = SpacesConfig(
-            bucket="test-bucket",
-            region="nyc3",
-            access_key="key",
-            secret_key="secret"
-        )
+        config = SpacesConfig(bucket="test-bucket", region="nyc3", access_key="key", secret_key="secret")
 
         with patch("do_app_sandbox.snapshot.SpacesClient"):
             from do_app_sandbox.snapshot import SnapshotManager
+
             manager = SnapshotManager(spaces_config=config, prefix="custom-prefix")
 
             assert manager._prefix == "custom-prefix/"
@@ -336,16 +325,12 @@ class TestSnapshotManagerOperations:
     @pytest.fixture
     def snapshot_manager(self, mock_spaces_client):
         """Create SnapshotManager with mocked dependencies."""
-        config = SpacesConfig(
-            bucket="test-bucket",
-            region="nyc3",
-            access_key="key",
-            secret_key="secret"
-        )
+        config = SpacesConfig(bucket="test-bucket", region="nyc3", access_key="key", secret_key="secret")
 
         with patch("do_app_sandbox.snapshot.SpacesClient") as MockClient:
             MockClient.return_value = mock_spaces_client
             from do_app_sandbox.snapshot import SnapshotManager
+
             manager = SnapshotManager(spaces_config=config)
             manager._spaces = mock_spaces_client
             return manager
@@ -356,23 +341,23 @@ class TestSnapshotManagerOperations:
 
         result = snapshot_manager.snapshot_exists("snap-test")
 
-        mock_spaces_client.object_exists.assert_called_once_with(
-            "snapshots/snap-test/metadata.json"
-        )
+        mock_spaces_client.object_exists.assert_called_once_with("snapshots/snap-test/metadata.json")
         assert result is True
 
     def test_get_snapshot_returns_metadata(self, snapshot_manager, mock_spaces_client):
         """get_snapshot() returns SnapshotMetadata."""
         now = time.time()
-        metadata_json = json.dumps({
-            "snapshot_id": "snap-test",
-            "created_at": now,
-            "sandbox_image": "python",
-            "size_bytes": 1024,
-            "paths": ["/workspace"],
-            "description": None,
-            "tags": {}
-        }).encode()
+        metadata_json = json.dumps(
+            {
+                "snapshot_id": "snap-test",
+                "created_at": now,
+                "sandbox_image": "python",
+                "size_bytes": 1024,
+                "paths": ["/workspace"],
+                "description": None,
+                "tags": {},
+            }
+        ).encode()
 
         mock_spaces_client.get_object.return_value = metadata_json
 
@@ -408,8 +393,7 @@ class TestSnapshotManagerOperations:
         url = snapshot_manager.get_snapshot_download_url("snap-test", expires_in=3600)
 
         mock_spaces_client.generate_presigned_download_url.assert_called_once_with(
-            "snapshots/snap-test/archive.tar.gz",
-            3600
+            "snapshots/snap-test/archive.tar.gz", 3600
         )
         assert url == "https://download.url"
 

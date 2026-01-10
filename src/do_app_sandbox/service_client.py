@@ -6,7 +6,8 @@ sandboxes deployed in service mode via HTTP/SSE.
 
 import json
 import time
-from typing import Any, AsyncGenerator, Dict, Generator, List, Optional
+from collections.abc import AsyncGenerator, Generator
+from typing import Any
 
 try:
     import httpx
@@ -33,9 +34,7 @@ class SandboxServiceClient:
             timeout: Default timeout for requests in seconds
         """
         if httpx is None:
-            raise ImportError(
-                "httpx is required for service mode. Install with: pip install httpx"
-            )
+            raise ImportError("httpx is required for service mode. Install with: pip install httpx")
 
         self._base_url = base_url.rstrip("/")
         self._token = token
@@ -46,8 +45,8 @@ class SandboxServiceClient:
         self,
         method: str,
         path: str,
-        json_data: Optional[Dict] = None,
-        timeout: Optional[float] = None,
+        json_data: dict | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
         """Make an HTTP request to the sandbox service."""
         url = f"{self._base_url}{path}"
@@ -77,7 +76,7 @@ class SandboxServiceClient:
             else:
                 raise CommandExecutionError(f"HTTP error {e.response.status_code}: {e}")
 
-    def health(self) -> Dict[str, Any]:
+    def health(self) -> dict[str, Any]:
         """Check sandbox health.
 
         Returns:
@@ -89,7 +88,7 @@ class SandboxServiceClient:
     def exec(
         self,
         command: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         cwd: str = "/workspace",
         timeout: int = 120,
     ) -> CommandResult:
@@ -125,7 +124,7 @@ class SandboxServiceClient:
     def exec_stream(
         self,
         command: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         cwd: str = "/workspace",
         timeout: int = 120,
     ) -> Generator[StreamEvent, None, None]:
@@ -182,7 +181,7 @@ class SandboxServiceClient:
         self,
         command: str,
         cwd: str = "/workspace",
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> int:
         """Start a background process.
 
@@ -202,7 +201,7 @@ class SandboxServiceClient:
         data = response.json()
         return data.get("pid", 0)
 
-    def list_processes(self) -> List[ProcessInfo]:
+    def list_processes(self) -> list[ProcessInfo]:
         """List tracked background processes.
 
         Returns:
@@ -219,7 +218,7 @@ class SandboxServiceClient:
             for p in data
         ]
 
-    def get_process_logs(self, pid: int, tail: Optional[int] = None) -> str:
+    def get_process_logs(self, pid: int, tail: int | None = None) -> str:
         """Get logs from a background process.
 
         Args:
@@ -283,9 +282,9 @@ class SandboxServiceClient:
     def create_session(
         self,
         session_id: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         cwd: str = "/workspace",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a new persistent session.
 
         Args:
@@ -303,7 +302,7 @@ class SandboxServiceClient:
         )
         return response.json()
 
-    def get_session(self, session_id: str) -> Dict[str, Any]:
+    def get_session(self, session_id: str) -> dict[str, Any]:
         """Get session info.
 
         Args:
@@ -315,9 +314,7 @@ class SandboxServiceClient:
         response = self._request("GET", f"/api/sessions/{session_id}")
         return response.json()
 
-    def session_exec(
-        self, session_id: str, command: str, timeout: int = 120
-    ) -> Dict[str, Any]:
+    def session_exec(self, session_id: str, command: str, timeout: int = 120) -> dict[str, Any]:
         """Execute command in a session.
 
         Args:
@@ -362,9 +359,7 @@ class AsyncSandboxServiceClient:
             timeout: Default timeout for requests in seconds
         """
         if httpx is None:
-            raise ImportError(
-                "httpx is required for service mode. Install with: pip install httpx"
-            )
+            raise ImportError("httpx is required for service mode. Install with: pip install httpx")
 
         self._base_url = base_url.rstrip("/")
         self._token = token
@@ -375,8 +370,8 @@ class AsyncSandboxServiceClient:
         self,
         method: str,
         path: str,
-        json_data: Optional[Dict] = None,
-        timeout: Optional[float] = None,
+        json_data: dict | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
         """Make an async HTTP request to the sandbox service."""
         url = f"{self._base_url}{path}"
@@ -406,7 +401,7 @@ class AsyncSandboxServiceClient:
             else:
                 raise CommandExecutionError(f"HTTP error {e.response.status_code}: {e}")
 
-    async def health(self) -> Dict[str, Any]:
+    async def health(self) -> dict[str, Any]:
         """Check sandbox health."""
         response = await self._request("GET", "/health", timeout=10.0)
         return response.json()
@@ -414,7 +409,7 @@ class AsyncSandboxServiceClient:
     async def exec(
         self,
         command: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         cwd: str = "/workspace",
         timeout: int = 120,
     ) -> CommandResult:
@@ -440,7 +435,7 @@ class AsyncSandboxServiceClient:
     async def exec_stream(
         self,
         command: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         cwd: str = "/workspace",
         timeout: int = 120,
     ) -> AsyncGenerator[StreamEvent, None]:
@@ -487,7 +482,7 @@ class AsyncSandboxServiceClient:
         self,
         command: str,
         cwd: str = "/workspace",
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> int:
         """Start a background process."""
         response = await self._request(
@@ -498,7 +493,7 @@ class AsyncSandboxServiceClient:
         data = response.json()
         return data.get("pid", 0)
 
-    async def list_processes(self) -> List[ProcessInfo]:
+    async def list_processes(self) -> list[ProcessInfo]:
         """List tracked background processes."""
         response = await self._request("GET", "/api/processes")
         data = response.json()
@@ -511,7 +506,7 @@ class AsyncSandboxServiceClient:
             for p in data
         ]
 
-    async def get_process_logs(self, pid: int, tail: Optional[int] = None) -> str:
+    async def get_process_logs(self, pid: int, tail: int | None = None) -> str:
         """Get logs from a background process."""
         params = f"?tail={tail}" if tail else ""
         response = await self._request("GET", f"/api/processes/{pid}/logs{params}")
@@ -550,9 +545,9 @@ class AsyncSandboxServiceClient:
     async def create_session(
         self,
         session_id: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         cwd: str = "/workspace",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a new persistent session."""
         response = await self._request(
             "POST",
@@ -561,14 +556,12 @@ class AsyncSandboxServiceClient:
         )
         return response.json()
 
-    async def get_session(self, session_id: str) -> Dict[str, Any]:
+    async def get_session(self, session_id: str) -> dict[str, Any]:
         """Get session info."""
         response = await self._request("GET", f"/api/sessions/{session_id}")
         return response.json()
 
-    async def session_exec(
-        self, session_id: str, command: str, timeout: int = 120
-    ) -> Dict[str, Any]:
+    async def session_exec(self, session_id: str, command: str, timeout: int = 120) -> dict[str, Any]:
         """Execute command in a session."""
         response = await self._request(
             "POST",

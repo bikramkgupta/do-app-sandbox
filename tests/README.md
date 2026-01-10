@@ -2,114 +2,175 @@
 
 This directory contains a comprehensive suite of tests for the `do-app-sandbox` SDK, ranging from unit tests to multi-hour stress tests.
 
-## 🚀 Incremental Testing Strategy
+> **For AI Assistants**: See [CLAUDE.md](./CLAUDE.md) for detailed guidance on writing and running tests.
 
-To ensure stability and catch bugs early, follow this incremental testing path:
+## Quick Start
 
-### Step 1: Unit Tests (Fast, No Network)
-Validate internal logic, type safety, and state machine transitions using mocks.
 ```bash
-uv run --extra dev pytest tests/unit/ -v
+# Run fast unit tests (no cloud required)
+uv run pytest tests/unit/ -v
+
+# Run API tests (requires running container)
+SANDBOX_API_URL=http://localhost:8080 SANDBOX_API_TOKEN=test-token \
+  uv run pytest tests/api/ -v
+
+# Run integration tests (requires DIGITALOCEAN_TOKEN)
+uv run pytest tests/integration/ -v
 ```
 
-### Step 2: Container API Tests (Local Docker)
-Validate the FastAPI `sandbox_api` server that runs inside "Service Mode" containers.
-1. Build and run the test container locally:
-   ```bash
-   docker build -t sandbox-api-test -f images/sandbox-python-service/Dockerfile images/
-   docker run -p 8080:8080 -e SANDBOX_API_TOKEN=test-token sandbox-api-test
-   ```
-2. Run the tests against the local container:
-   ```bash
-   SANDBOX_API_URL=http://localhost:8080 SANDBOX_API_TOKEN=test-token pytest tests/container/
-   ```
+## Test Categories
 
-#### Running Against a Cloud Sandbox (Alternative)
-Container tests can also run against a deployed Service sandbox for true E2E validation through real DigitalOcean ingress/load balancers.
+| Directory | Duration | Cloud? | Purpose |
+|-----------|----------|--------|---------|
+| `unit/` | ~10s | No | Fast isolated tests with mocks |
+| `api/` | ~1min | Container | Container API endpoint tests |
+| `integration/` | ~5min | Yes | Multi-component E2E tests |
+| `functional/` | ~10min | Yes | Full workflow tests |
+| `stress/` | 10min-8hr | Yes | Load and stress tests |
+| `modeling/` | ~1min | No | Algorithmic simulation |
+| `benchmarks/` | ~30min | Yes | Performance measurement |
+| `perf/` | ~15min | Yes | Lifecycle & file transfer timing |
+| `smoke/` | ~2min | Yes | Quick sanity checks |
 
-1. Create a Service sandbox:
-   ```bash
-   sandbox create --image python --component-type service
-   ```
-   Note the URL (e.g., `https://my-sandbox-xxxxx.ondigitalocean.app`).
+## Incremental Testing Strategy
 
-2. Run tests targeting the cloud sandbox:
-   ```bash
-   export SANDBOX_API_URL="https://your-sandbox-url.ondigitalocean.app"
-   export SANDBOX_API_TOKEN="your-token-value"
-   uv run pytest tests/container/ -v
-   ```
+Follow this path from fastest to slowest:
 
-**Note:** Unit tests (`tests/unit/`) cannot run in the cloud - they test internal Python logic using mocks and must run locally.
+### Step 1: Unit Tests (No Network)
 
-### Step 3: Functional & Integration Tests (Real Infrastructure)
-Validate end-to-end flows on DigitalOcean App Platform. Requires `DIGITALOCEAN_TOKEN` and Spaces configuration.
+Validate internal logic using mocks. Runs in seconds.
+
 ```bash
-# Basic SDK lifecycle
-uv run python tests/functional/test_03_basic_sdk.py
+uv run pytest tests/unit/ -v
+```
 
-# Integration tests (Service mode, Snapshots, Hibernation)
-uv run --extra dev pytest tests/integration/ -v
+### Step 2: API Tests (Local Docker or Cloud)
+
+Test the FastAPI `sandbox_api` server.
+
+**Option A: Local Docker**
+```bash
+# Build the image
+docker build -t sandbox-api-test -f images/sandbox-python-service/Dockerfile images/
+
+# Run container (use -d for detached mode)
+docker run -d --name sandbox-api-test -p 8080:8080 -e SANDBOX_API_TOKEN=test-token sandbox-api-test
+
+# Run tests
+SANDBOX_API_URL=http://localhost:8080 SANDBOX_API_TOKEN=test-token \
+  uv run pytest tests/api/ -v
+
+# Stop container when done
+docker stop sandbox-api-test && docker rm sandbox-api-test
+```
+
+**Option B: Cloud Sandbox**
+```bash
+sandbox create --image python --component-type service
+# Note the URL and token
+
+SANDBOX_API_URL=https://your-sandbox.ondigitalocean.app \
+SANDBOX_API_TOKEN=your-token \
+  uv run pytest tests/api/ -v
+```
+
+### Step 3: Integration & Functional Tests
+
+Requires `DIGITALOCEAN_TOKEN` and optionally `SPACES_*` credentials.
+
+```bash
+# Integration tests
+uv run pytest tests/integration/ -v
+
+# Functional tests
+uv run python tests/functional/run_all.py
 ```
 
 ### Step 4: Stress & Performance Tests
-Validate system behavior under heavy load and long durations.
-```bash
-# 10-minute smoke stress test
-uv run python -m tests.manager_stress --scenario quick_validation
 
-# 4-hour rigorous pool test (Hard Cap 25)
-uv run python -m tests.rigorous_pool_test.run_25cap_4hr
+Long-running tests for load validation.
+
+```bash
+# Quick 10-minute stress test
+uv run python -m tests.stress.manager_load --scenario quick_validation
+
+# Pool capacity test (4 hours)
+uv run python -m tests.stress.pool_capacity.run
+
+# Dry-run mode (no cloud cost)
+uv run python -m tests.stress.manager_load --scenario full_stress --dry-run
 ```
 
----
+### Step 5: Modeling (No Cloud)
 
-## 🛠 Building Images for Testing
+Algorithmic simulation for pool sizing and parameter tuning.
 
-Since GitHub Actions only run on the `main` branch, you must build and push images manually to test the new Service/Worker mode features.
-
-### Option 1: Push to DigitalOcean Container Registry (DOCR)
-Recommended for testing on App Platform.
-1. Login to your registry: `doctl registry login`
-2. Run the build script (updates coming soon) or use Docker:
-   ```bash
-   export REGISTRY="registry.digitalocean.com/your-registry"
-   docker build -t $REGISTRY/sandbox-python-service:latest -f images/sandbox-python-service/Dockerfile images/
-   docker push $REGISTRY/sandbox-python-service:latest
-   ```
-
-### Option 2: Use the Build Script
-Update your `.env` with `GHCR_OWNER` and use the provided script to build all images:
 ```bash
-./scripts/build-ghcr.sh
+# Run pool sizing simulator (shows how to achieve 95%+ hit rate)
+cd tests/modeling/pool_simulator && uv run python demand_curves.py
+
+# Or run as module
+uv run python -m tests.modeling.pool_simulator.demand_curves
+
+# Run modeling unit tests
+uv run pytest tests/modeling/ -v
 ```
 
----
+The simulator helps answer: "For X requests/min with Y-minute holds, what pool size gives 95% hit rate?"
 
-## 📂 Test Suites Reference
+Key formula: `concurrent_load = requests_per_minute × avg_hold_minutes`
 
-| Directory | Type | Purpose |
-|-----------|------|---------|
-| `unit/` | Unit | Fast tests for types, logic, and mocks. |
-| `container/` | API | Validates the FastAPI agent inside the sandbox. |
-| `integration/` | E2E | Tests real DO/Spaces integration (Mode, Snapshots). |
-| `functional/` | E2E | High-level functional flow benchmarks. |
-| `manager_stress/` | Stress | Multi-user load simulation for SandboxManager. |
-| `manager_simulator/`| Algo | Accelerated algorithmic simulation (no cost). |
-| `rigorous_pool_test/`| Stress | 4-hour hard-cap capacity enforcement test. |
+## Directory Structure
 
----
+```
+tests/
+├── CLAUDE.md              # AI guidance
+├── README.md              # This file
+├── conftest.py            # Root pytest configuration
+│
+├── unit/                  # Fast isolated tests
+├── api/                   # Container API tests
+├── integration/           # Multi-component E2E tests
+├── functional/            # Full workflow tests
+│
+├── stress/                # Long-running load tests
+│   ├── pool_capacity/     # Hard-cap capacity enforcement
+│   ├── manager_load/      # Multi-user simulation
+│   └── README.md
+│
+├── modeling/              # Algorithmic simulation
+│   ├── pool_simulator/    # Demand curve testing
+│   └── README.md
+│
+├── benchmarks/            # Performance measurement
+├── perf/                  # Lifecycle timing harness
+├── smoke/                 # Quick sanity checks
+└── artifacts/             # Test outputs (gitignored)
+```
 
-## ⚙️ Configuration
+## Pytest Markers
 
-Tests use environment variables defined in your `.env` file:
+Filter tests by type:
 
 ```bash
-# DigitalOcean
+pytest -m unit              # Only unit tests
+pytest -m integration       # Only integration tests
+pytest -m api               # Only API tests
+pytest -m "not slow"        # Skip slow tests
+```
+
+## Environment Variables
+
+```bash
+# DigitalOcean (required for cloud tests)
 DIGITALOCEAN_TOKEN=dop_v1_...
 APP_SANDBOX_REGION=syd1
 
-# DigitalOcean Spaces (Required for Snapshots/Large Files)
+# Container API tests
+SANDBOX_API_URL=http://localhost:8080
+SANDBOX_API_TOKEN=test-token
+
+# Spaces (for snapshots/large files)
 SPACES_BUCKET=your-bucket
 SPACES_REGION=nyc3
 SPACES_ACCESS_KEY=...
@@ -117,14 +178,27 @@ SPACES_SECRET_KEY=...
 
 # Image Registry
 GHCR_OWNER=your-username
-APP_SANDBOX_REGISTRY=ghcr.io  # Or your DOCR host
+APP_SANDBOX_REGISTRY=ghcr.io
 ```
 
----
+## Building Test Images
 
-## 📊 Results & Artifacts
+For Service/Worker mode testing:
 
-Test results and reports are saved to `tests/artifacts/`:
-- **Stress Reports**: `tests/artifacts/stress/report_*.html`
-- **Pool Metrics**: `tests/artifacts/stress/metrics_*.csv`
-- **Rigorous Summary**: `tests/artifacts/rigorous_pool_test/*/summary.txt`
+```bash
+# Option 1: DigitalOcean Container Registry
+doctl registry login
+docker build -t registry.digitalocean.com/your-registry/sandbox-python-service:latest \
+  -f images/sandbox-python-service/Dockerfile images/
+docker push registry.digitalocean.com/your-registry/sandbox-python-service:latest
+
+# Option 2: GHCR
+./scripts/build-ghcr.sh
+```
+
+## Artifacts
+
+Test outputs are saved to `tests/artifacts/`:
+- `stress/` - Stress test reports (HTML, CSV, JSON)
+- `pool_capacity/` - Pool capacity test results
+- `simulation_*.csv/html` - Modeling outputs

@@ -32,6 +32,7 @@ BUILD_SERVICE=true
 BUILD_LATEST=true
 DRY_RUN=false
 REGISTRY_HOST="ghcr.io"
+TAG_SUFFIX=""
 
 usage() {
     cat << EOF
@@ -44,6 +45,8 @@ Options:
     --owner OWNER       Image owner/namespace (overrides GHCR_OWNER)
     --user USER         Username for login (overrides GHCR_USER)
     --pat PAT           Personal Access Token / Password (overrides GHCR_PAT)
+    --tag-suffix TAG    Use TAG for all images (e.g., 'temp', 'dev', 'test')
+                        Replaces version-specific tags with a single tag
     --python-only       Only build Python images
     --node-only         Only build Node images
     --no-service        Skip building service/worker specialized images
@@ -62,6 +65,9 @@ Examples:
 
     # Build only Python images
     ./scripts/build-ghcr.sh --python-only
+
+    # Build with a test tag (all images get :temp tag)
+    ./scripts/build-ghcr.sh --tag-suffix temp
 
     # Dry run to see what would be built
     ./scripts/build-ghcr.sh --dry-run
@@ -91,7 +97,8 @@ load_env() {
         log_info "Loading environment from $env_file"
         # Export variables from .env, ignoring comments and empty lines
         set -a
-        source <(grep -v '^#' "$env_file" | grep -v '^$' | sed 's/^/export /')
+        # shellcheck disable=SC1090
+        source "$env_file"
         set +a
     fi
 }
@@ -114,6 +121,10 @@ parse_args() {
                 ;;
             --pat)
                 GHCR_PAT="$2"
+                shift 2
+                ;;
+            --tag-suffix)
+                TAG_SUFFIX="$2"
                 shift 2
                 ;;
             --python-only)
@@ -235,6 +246,9 @@ build_all() {
     echo "  Registry: $REGISTRY_HOST"
     echo "  Owner:    $GHCR_OWNER"
     echo "  User:     $GHCR_USER"
+    if [[ -n "$TAG_SUFFIX" ]]; then
+        echo "  Tag:      $TAG_SUFFIX (all images)"
+    fi
     echo "=========================================="
     echo ""
 
@@ -242,21 +256,30 @@ build_all() {
     if [[ "$BUILD_PYTHON" == "true" ]]; then
         log_info "Building Python images..."
 
-        build_image \
-            "$images_dir/python/Dockerfile.python3.12" \
-            "sandbox-python:python3.12" \
-            "$images_dir/python/"
-
-        build_image \
-            "$images_dir/python/Dockerfile.python3.13" \
-            "sandbox-python:python3.13" \
-            "$images_dir/python/"
-
-        if [[ "$BUILD_LATEST" == "true" ]]; then
+        if [[ -n "$TAG_SUFFIX" ]]; then
+            # Build single image with custom tag
             build_image \
                 "$images_dir/python/Dockerfile" \
-                "sandbox-python:latest" \
+                "sandbox-python:$TAG_SUFFIX" \
                 "$images_dir/python/"
+        else
+            # Build version-specific images
+            build_image \
+                "$images_dir/python/Dockerfile.python3.12" \
+                "sandbox-python:python3.12" \
+                "$images_dir/python/"
+
+            build_image \
+                "$images_dir/python/Dockerfile.python3.13" \
+                "sandbox-python:python3.13" \
+                "$images_dir/python/"
+
+            if [[ "$BUILD_LATEST" == "true" ]]; then
+                build_image \
+                    "$images_dir/python/Dockerfile" \
+                    "sandbox-python:latest" \
+                    "$images_dir/python/"
+            fi
         fi
     fi
 
@@ -264,21 +287,30 @@ build_all() {
     if [[ "$BUILD_NODE" == "true" ]]; then
         log_info "Building Node images..."
 
-        build_image \
-            "$images_dir/node/Dockerfile.node22" \
-            "sandbox-node:node22" \
-            "$images_dir/node/"
-
-        build_image \
-            "$images_dir/node/Dockerfile.node24" \
-            "sandbox-node:node24" \
-            "$images_dir/node/"
-
-        if [[ "$BUILD_LATEST" == "true" ]]; then
+        if [[ -n "$TAG_SUFFIX" ]]; then
+            # Build single image with custom tag
             build_image \
                 "$images_dir/node/Dockerfile" \
-                "sandbox-node:latest" \
+                "sandbox-node:$TAG_SUFFIX" \
                 "$images_dir/node/"
+        else
+            # Build version-specific images
+            build_image \
+                "$images_dir/node/Dockerfile.node22" \
+                "sandbox-node:node22" \
+                "$images_dir/node/"
+
+            build_image \
+                "$images_dir/node/Dockerfile.node24" \
+                "sandbox-node:node24" \
+                "$images_dir/node/"
+
+            if [[ "$BUILD_LATEST" == "true" ]]; then
+                build_image \
+                    "$images_dir/node/Dockerfile" \
+                    "sandbox-node:latest" \
+                    "$images_dir/node/"
+            fi
         fi
     fi
 
@@ -286,28 +318,30 @@ build_all() {
     if [[ "$BUILD_SERVICE" == "true" ]]; then
         log_info "Building Specialized Service/Worker images..."
 
+        local svc_tag="${TAG_SUFFIX:-latest}"
+
         # Python Service
         build_image \
             "$images_dir/sandbox-python-service/Dockerfile" \
-            "sandbox-python-service:latest" \
+            "sandbox-python-service:$svc_tag" \
             "$images_dir/"
 
         # Python Worker
         build_image \
             "$images_dir/sandbox-python-worker/Dockerfile" \
-            "sandbox-python-worker:latest" \
+            "sandbox-python-worker:$svc_tag" \
             "$images_dir/"
 
         # Node Service
         build_image \
             "$images_dir/sandbox-node-service/Dockerfile" \
-            "sandbox-node-service:latest" \
+            "sandbox-node-service:$svc_tag" \
             "$images_dir/"
 
         # Node Worker
         build_image \
             "$images_dir/sandbox-node-worker/Dockerfile" \
-            "sandbox-node-worker:latest" \
+            "sandbox-node-worker:$svc_tag" \
             "$images_dir/"
     fi
 
