@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 22 LTS for compatibility
@@ -34,10 +35,10 @@ RUN bun --version && node --version && npm --version && python3 --version
 # Install sandbox API dependencies
 # Using pip since uv may not be available in all base images
 RUN pip3 install --no-cache-dir --break-system-packages \
-    fastapi==0.109.2 \
-    uvicorn[standard]==0.27.1 \
-    httpx==0.26.0 \
-    pydantic==2.6.1
+    fastapi>=0.115.0 \
+    uvicorn[standard]>=0.32.0 \
+    httpx>=0.27.0 \
+    pydantic>=2.10.0
 
 # Copy sandbox API server
 COPY sandbox_api/ /opt/sandbox_api/

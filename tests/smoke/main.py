@@ -10,10 +10,10 @@ import argparse
 import json
 import os
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from do_app_sandbox import Sandbox
 from do_app_sandbox.spaces import create_spaces_config_from_env
@@ -22,15 +22,15 @@ from do_app_sandbox.spaces import create_spaces_config_from_env
 @dataclass
 class SmokeResult:
     image: str
-    app_id: Optional[str]
-    url: Optional[str]
-    create_seconds: Optional[float]
-    delete_seconds: Optional[float]
-    echo_stdout: Optional[str]
-    echo_exit: Optional[int]
-    version_stdout: Optional[str]
-    version_exit: Optional[int]
-    error: Optional[str] = None
+    app_id: str | None
+    url: str | None
+    create_seconds: float | None
+    delete_seconds: float | None
+    echo_stdout: str | None
+    echo_exit: int | None
+    version_stdout: str | None
+    version_exit: int | None
+    error: str | None = None
 
 
 def run_smoke(image: str, registry: str, region: str, spaces: bool) -> SmokeResult:
@@ -114,8 +114,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("tests/artifacts")
-        / f"smoke-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json",
+        default=Path("tests/artifacts") / f"smoke-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json",
         help="Path to write JSON results",
     )
     parser.add_argument(
@@ -136,7 +135,7 @@ def main() -> None:
 
     region = (args.region or os.environ.get("APP_SANDBOX_REGION") or "nyc").lower()
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for image in args.images:
         res = run_smoke(image, registry, region, spaces=args.spaces)
         results.append(asdict(res))

@@ -19,18 +19,11 @@ class TestGitCheckoutPublic:
         """Clone public GitHub repo (~15s)."""
         from do_app_sandbox import Sandbox
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         # Clone a small public repo
-        result = sandbox.git_checkout(
-            url="https://github.com/octocat/Hello-World.git",
-            path="/workspace/hello-world"
-        )
+        result = sandbox.git_checkout(url="https://github.com/octocat/Hello-World.git", path="/workspace/hello-world")
 
         assert result.success or result.exit_code == 0
 
@@ -43,18 +36,14 @@ class TestGitCheckoutPublic:
         """Clone specific branch (~15s)."""
         from do_app_sandbox import Sandbox
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         # Clone a specific branch
         result = sandbox.git_checkout(
             url="https://github.com/octocat/Hello-World.git",
             path="/workspace/hw-master",
-            branch="master"
+            branch="master",
         )
 
         assert result.success or result.exit_code == 0
@@ -68,17 +57,11 @@ class TestGitCheckoutPublic:
         """Shallow clone (depth=1) (~10s)."""
         from do_app_sandbox import Sandbox
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         result = sandbox.git_checkout(
-            url="https://github.com/octocat/Hello-World.git",
-            path="/workspace/shallow",
-            depth=1
+            url="https://github.com/octocat/Hello-World.git", path="/workspace/shallow", depth=1
         )
 
         assert result.success or result.exit_code == 0
@@ -93,19 +76,12 @@ class TestGitCheckoutPublic:
         """Clone to custom path (~15s)."""
         from do_app_sandbox import Sandbox
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
         custom_path = "/workspace/projects/my-repo"
 
-        result = sandbox.git_checkout(
-            url="https://github.com/octocat/Hello-World.git",
-            path=custom_path
-        )
+        result = sandbox.git_checkout(url="https://github.com/octocat/Hello-World.git", path=custom_path)
 
         assert result.success or result.exit_code == 0
 
@@ -128,6 +104,7 @@ class TestGitCheckoutAuth:
     def test_git_checkout_with_token(self, do_token, cleanup_sandboxes):
         """Clone with PAT (private repo) (~15s)."""
         import os
+
         from do_app_sandbox import Sandbox
         from do_app_sandbox.types import GitCredentials
 
@@ -135,23 +112,16 @@ class TestGitCheckoutAuth:
         if not github_token:
             pytest.skip("GITHUB_TOKEN not set")
 
-        sandbox = Sandbox.create(
-            image="python",
-            api_token=do_token,
-            wait_ready=True
-        )
+        sandbox = Sandbox.create(image="python", api_token=do_token, wait_ready=True)
         cleanup_sandboxes(sandbox)
 
-        credentials = GitCredentials(
-            username="git",
-            token=github_token
-        )
+        credentials = GitCredentials(username="git", token=github_token)
 
         # This would need a real private repo URL
         result = sandbox.git_checkout(
             url="https://github.com/your-org/private-repo.git",
             path="/workspace/private",
-            credentials=credentials
+            credentials=credentials,
         )
 
         # If the repo exists and token is valid, this should succeed

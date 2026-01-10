@@ -1,8 +1,7 @@
 """Tests for service_client.py - HTTP Client Tests."""
 
-import json
 import time
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -18,9 +17,11 @@ class TestSandboxServiceClient:
         """Fixture to mock httpx module."""
         with patch.dict("sys.modules", {"httpx": httpx_mock}):
             # Re-import to get mocked version
-            from do_app_sandbox import service_client
             # Reload to pick up the mock
             import importlib
+
+            from do_app_sandbox import service_client
+
             importlib.reload(service_client)
             yield httpx_mock
             # Restore
@@ -31,11 +32,7 @@ class TestSandboxServiceClient:
         with patch("do_app_sandbox.service_client.httpx") as mock_httpx:
             from do_app_sandbox.service_client import SandboxServiceClient
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com",
-                token="test-token-123",
-                timeout=60.0
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com", token="test-token-123", timeout=60.0)
 
             assert client._base_url == "https://sandbox.example.com"
             assert client._token == "test-token-123"
@@ -46,10 +43,7 @@ class TestSandboxServiceClient:
         with patch("do_app_sandbox.service_client.httpx") as mock_httpx:
             from do_app_sandbox.service_client import SandboxServiceClient
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com/",
-                token="token"
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com/", token="token")
 
             assert client._base_url == "https://sandbox.example.com"
 
@@ -58,10 +52,7 @@ class TestSandboxServiceClient:
         with patch("do_app_sandbox.service_client.httpx") as mock_httpx:
             from do_app_sandbox.service_client import SandboxServiceClient
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com",
-                token="my-secret-token"
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com", token="my-secret-token")
 
             assert client._headers == {"Authorization": "Bearer my-secret-token"}
 
@@ -72,11 +63,7 @@ class TestSandboxServiceClient:
 
             # Setup mock response
             mock_response = MagicMock()
-            mock_response.json.return_value = {
-                "stdout": "output",
-                "stderr": "",
-                "exit_code": 0
-            }
+            mock_response.json.return_value = {"stdout": "output", "stderr": "", "exit_code": 0}
             mock_response.raise_for_status = MagicMock()
 
             mock_client_instance = MagicMock()
@@ -85,17 +72,9 @@ class TestSandboxServiceClient:
             mock_client_instance.__exit__ = MagicMock(return_value=False)
             mock_httpx.Client.return_value = mock_client_instance
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com",
-                token="token"
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com", token="token")
 
-            result = client.exec(
-                command="echo hello",
-                env={"FOO": "bar"},
-                cwd="/app",
-                timeout=30
-            )
+            result = client.exec(command="echo hello", env={"FOO": "bar"}, cwd="/app", timeout=30)
 
             # Verify request was made with correct payload
             mock_client_instance.request.assert_called_once()
@@ -117,7 +96,7 @@ class TestSandboxServiceClient:
             mock_response.json.return_value = {
                 "stdout": "Hello, World!",
                 "stderr": "warning message",
-                "exit_code": 0
+                "exit_code": 0,
             }
             mock_response.raise_for_status = MagicMock()
 
@@ -127,10 +106,7 @@ class TestSandboxServiceClient:
             mock_client_instance.__exit__ = MagicMock(return_value=False)
             mock_httpx.Client.return_value = mock_client_instance
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com",
-                token="token"
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com", token="token")
 
             result = client.exec("test command")
 
@@ -154,10 +130,7 @@ class TestSandboxServiceClient:
             mock_client_instance.__exit__ = MagicMock(return_value=False)
             mock_httpx.Client.return_value = mock_client_instance
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com",
-                token="token"
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com", token="token")
 
             pid = client.exec_background("python server.py")
 
@@ -172,7 +145,7 @@ class TestSandboxServiceClient:
             mock_response = MagicMock()
             mock_response.json.return_value = [
                 {"pid": 123, "command": "python app.py", "status": "running"},
-                {"pid": 456, "command": "node server.js", "status": "stopped"}
+                {"pid": 456, "command": "node server.js", "status": "stopped"},
             ]
             mock_response.raise_for_status = MagicMock()
 
@@ -182,10 +155,7 @@ class TestSandboxServiceClient:
             mock_client_instance.__exit__ = MagicMock(return_value=False)
             mock_httpx.Client.return_value = mock_client_instance
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com",
-                token="token"
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com", token="token")
 
             processes = client.list_processes()
 
@@ -204,7 +174,7 @@ class TestSandboxServiceClient:
             mock_response.json.return_value = {
                 "session_id": "my-session",
                 "cwd": "/workspace",
-                "created_at": time.time()
+                "created_at": time.time(),
             }
             mock_response.raise_for_status = MagicMock()
 
@@ -214,16 +184,9 @@ class TestSandboxServiceClient:
             mock_client_instance.__exit__ = MagicMock(return_value=False)
             mock_httpx.Client.return_value = mock_client_instance
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com",
-                token="token"
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com", token="token")
 
-            result = client.create_session(
-                session_id="my-session",
-                env={"PATH": "/usr/bin"},
-                cwd="/workspace"
-            )
+            result = client.create_session(session_id="my-session", env={"PATH": "/usr/bin"}, cwd="/workspace")
 
             assert result["session_id"] == "my-session"
 
@@ -236,11 +199,7 @@ class TestAsyncSandboxServiceClient:
         with patch("do_app_sandbox.service_client.httpx") as mock_httpx:
             from do_app_sandbox.service_client import AsyncSandboxServiceClient
 
-            client = AsyncSandboxServiceClient(
-                base_url="https://async.example.com",
-                token="async-token",
-                timeout=90.0
-            )
+            client = AsyncSandboxServiceClient(base_url="https://async.example.com", token="async-token", timeout=90.0)
 
             assert client._base_url == "https://async.example.com"
             assert client._token == "async-token"
@@ -263,7 +222,7 @@ class TestSSEEventParsing:
         event = StreamEvent(
             type=event_type,
             data=event_data.get("line", ""),
-            timestamp=event_data.get("timestamp", time.time())
+            timestamp=event_data.get("timestamp", time.time()),
         )
 
         assert event.type == "stdout"
@@ -274,11 +233,7 @@ class TestSSEEventParsing:
         """Correctly parses stderr SSE events."""
         from do_app_sandbox.types import StreamEvent
 
-        event = StreamEvent(
-            type="stderr",
-            data="Error: file not found",
-            timestamp=time.time()
-        )
+        event = StreamEvent(type="stderr", data="Error: file not found", timestamp=time.time())
 
         assert event.type == "stderr"
         assert event.is_output is True
@@ -287,11 +242,7 @@ class TestSSEEventParsing:
         """Correctly parses exit SSE events."""
         from do_app_sandbox.types import StreamEvent
 
-        event = StreamEvent(
-            type="exit",
-            data="0",
-            timestamp=time.time()
-        )
+        event = StreamEvent(type="exit", data="0", timestamp=time.time())
 
         assert event.type == "exit"
         assert event.is_complete is True
@@ -300,11 +251,7 @@ class TestSSEEventParsing:
         """Correctly parses error SSE events."""
         from do_app_sandbox.types import StreamEvent
 
-        event = StreamEvent(
-            type="error",
-            data="Command execution failed",
-            timestamp=time.time()
-        )
+        event = StreamEvent(type="error", data="Command execution failed", timestamp=time.time())
 
         assert event.type == "error"
         assert event.is_complete is True
@@ -316,8 +263,8 @@ class TestServiceClientErrors:
     def test_connection_error_handling(self):
         """ServiceConnectionError raised on connect failure."""
         with patch("do_app_sandbox.service_client.httpx") as mock_httpx:
-            from do_app_sandbox.service_client import SandboxServiceClient
             from do_app_sandbox.exceptions import ServiceConnectionError
+            from do_app_sandbox.service_client import SandboxServiceClient
 
             # Setup mock to raise ConnectError
             mock_httpx.ConnectError = Exception
@@ -327,10 +274,7 @@ class TestServiceClientErrors:
             mock_client_instance.__exit__ = MagicMock(return_value=False)
             mock_httpx.Client.return_value = mock_client_instance
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com",
-                token="token"
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com", token="token")
 
             with pytest.raises(ServiceConnectionError):
                 client.exec("test")
@@ -338,8 +282,8 @@ class TestServiceClientErrors:
     def test_timeout_error_handling(self):
         """CommandTimeoutError raised on timeout."""
         with patch("do_app_sandbox.service_client.httpx") as mock_httpx:
-            from do_app_sandbox.service_client import SandboxServiceClient
             from do_app_sandbox.exceptions import CommandTimeoutError
+            from do_app_sandbox.service_client import SandboxServiceClient
 
             # Setup mock to raise TimeoutException
             mock_httpx.TimeoutException = Exception
@@ -350,10 +294,7 @@ class TestServiceClientErrors:
             mock_client_instance.__exit__ = MagicMock(return_value=False)
             mock_httpx.Client.return_value = mock_client_instance
 
-            client = SandboxServiceClient(
-                base_url="https://sandbox.example.com",
-                token="token"
-            )
+            client = SandboxServiceClient(base_url="https://sandbox.example.com", token="token")
 
             with pytest.raises(CommandTimeoutError):
                 client.exec("long running command")

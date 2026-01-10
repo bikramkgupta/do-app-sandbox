@@ -11,13 +11,12 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Union
 
 from .exceptions import SandboxCreationError, SandboxNotFoundError
 from .types import AppInfo, SandboxMode, ServiceConfig
 
 # Environment variables for GHCR configuration
-ENV_GHCR_OWNER = "GHCR_OWNER"        # Image owner/namespace (default: bikramkgupta)
+ENV_GHCR_OWNER = "GHCR_OWNER"  # Image owner/namespace (default: bikramkgupta)
 
 # Image repository names
 IMAGE_REPOS = {
@@ -131,12 +130,12 @@ class Deployer:
 
     def __init__(
         self,
-        registry: Optional[str] = None,
+        registry: str | None = None,
         registry_type: str = "GHCR",
-        owner: Optional[str] = None,
+        owner: str | None = None,
         region: str = DEFAULT_REGION,
         instance_size: str = DEFAULT_INSTANCE_SIZE,
-        api_token: Optional[str] = None,
+        api_token: str | None = None,
     ):
         """Initialize the deployer.
 
@@ -156,9 +155,7 @@ class Deployer:
         # Token is optional - doctl uses its own auth if not provided
         self.api_token = api_token or os.environ.get("DIGITALOCEAN_TOKEN")
 
-    def _run_doctl(
-        self, args: list[str], timeout: int = 120, capture_json: bool = True
-    ) -> tuple[int, str, str]:
+    def _run_doctl(self, args: list[str], timeout: int = 120, capture_json: bool = True) -> tuple[int, str, str]:
         """Run a doctl command.
 
         Args:
@@ -200,8 +197,8 @@ class Deployer:
         image: str,
         component_type: str = "service",
         mode: SandboxMode = SandboxMode.WORKER,
-        service_config: Optional[ServiceConfig] = None,
-    ) -> Tuple[str, Optional[str]]:
+        service_config: ServiceConfig | None = None,
+    ) -> tuple[str, str | None]:
         """Generate an app spec YAML for a sandbox.
 
         Args:
@@ -273,8 +270,8 @@ class Deployer:
         image: str = "python",
         component_type: str = "service",
         mode: SandboxMode = SandboxMode.WORKER,
-        service_config: Optional[ServiceConfig] = None,
-    ) -> Tuple[AppInfo, Optional[str]]:
+        service_config: ServiceConfig | None = None,
+    ) -> tuple[AppInfo, str | None]:
         """Create a new App Platform application.
 
         Args:
@@ -291,14 +288,10 @@ class Deployer:
             SandboxCreationError: If app creation fails
         """
         # Generate app spec
-        spec, api_token = self._generate_app_spec(
-            name, image, component_type, mode, service_config
-        )
+        spec, api_token = self._generate_app_spec(name, image, component_type, mode, service_config)
 
         # Write spec to temp file
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(spec)
             spec_path = f.name
 
@@ -438,9 +431,7 @@ class Deployer:
                 return app_info
 
             if status in ("ERROR", "FAILED"):
-                raise SandboxCreationError(
-                    f"App deployment failed with status: {status}"
-                )
+                raise SandboxCreationError(f"App deployment failed with status: {status}")
 
             time.sleep(poll_interval)
 

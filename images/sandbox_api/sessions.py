@@ -8,18 +8,18 @@ import os
 import pty
 import select
 import subprocess
-from dataclasses import dataclass, field
-from typing import Dict, Optional
 import time
+from dataclasses import dataclass, field
 
 
 @dataclass
 class Session:
     """A persistent shell session."""
+
     id: str
     pid: int
     master_fd: int
-    env: Dict[str, str]
+    env: dict[str, str]
     cwd: str
     created_at: float = field(default_factory=time.time)
 
@@ -28,14 +28,9 @@ class SessionManager:
     """Manages persistent shell sessions."""
 
     def __init__(self):
-        self._sessions: Dict[str, Session] = {}
+        self._sessions: dict[str, Session] = {}
 
-    def create(
-        self,
-        session_id: str,
-        env: Optional[Dict[str, str]] = None,
-        cwd: str = "/workspace"
-    ) -> Session:
+    def create(self, session_id: str, env: dict[str, str] | None = None, cwd: str = "/workspace") -> Session:
         """Create a new session with persistent bash shell.
 
         Args:
@@ -57,6 +52,8 @@ class SessionManager:
         session_env = os.environ.copy()
         if env:
             session_env.update(env)
+        # Set a known prompt for reliable detection
+        session_env["PS1"] = "SANDBOX_PROMPT$ "
 
         # Start bash in interactive mode
         proc = subprocess.Popen(
@@ -66,18 +63,12 @@ class SessionManager:
             stderr=slave,
             cwd=cwd,
             env=session_env,
-            preexec_fn=os.setsid
+            preexec_fn=os.setsid,
         )
 
         os.close(slave)
 
-        session = Session(
-            id=session_id,
-            pid=proc.pid,
-            master_fd=master,
-            env=env or {},
-            cwd=cwd
-        )
+        session = Session(id=session_id, pid=proc.pid, master_fd=master, env=env or {}, cwd=cwd)
         self._sessions[session_id] = session
 
         # Wait for shell prompt
@@ -85,7 +76,7 @@ class SessionManager:
 
         return session
 
-    def get(self, session_id: str) -> Optional[Session]:
+    def get(self, session_id: str) -> Session | None:
         """Get a session by ID."""
         return self._sessions.get(session_id)
 
@@ -93,12 +84,7 @@ class SessionManager:
         """Check if session exists."""
         return session_id in self._sessions
 
-    def exec_in_session(
-        self,
-        session_id: str,
-        command: str,
-        timeout: int = 120
-    ) -> str:
+    def exec_in_session(self, session_id: str, command: str, timeout: int = 120) -> str:
         """Execute command in session's persistent shell.
 
         Args:
@@ -123,11 +109,11 @@ class SessionManager:
         output = self._read_until_prompt(session.master_fd, timeout)
 
         # Remove command echo and prompt from output
-        lines = output.split('\n')
+        lines = output.split("\n")
         if lines and command in lines[0]:
             lines = lines[1:]
 
-        return '\n'.join(lines).strip()
+        return "\n".join(lines).strip()
 
     def _read_until_prompt(self, fd: int, timeout: int = 30) -> str:
         """Read from PTY until shell prompt appears.
@@ -141,12 +127,14 @@ class SessionManager:
         """
         output = []
         start_time = time.time()
+        prompt_marker = "SANDBOX_PROMPT$ "
 
         while time.time() - start_time < timeout:
             ready, _, _ = select.select([fd], [], [], 0.1)
             if not ready:
-                # Check if we've seen a prompt in recent output
-                if output and output[-1].rstrip().endswith(('$ ', '# ', '> ')):
+                # Check if we've seen our known prompt
+                full_output = "".join(output)
+                if prompt_marker in full_output:
                     break
                 continue
 
@@ -154,16 +142,16 @@ class SessionManager:
                 data = os.read(fd, 4096)
                 if not data:
                     break
-                decoded = data.decode(errors='replace')
+                decoded = data.decode(errors="replace")
                 output.append(decoded)
 
-                # Check for prompt
-                if decoded.rstrip().endswith(('$ ', '# ', '> ')):
+                # Check for our known prompt
+                if prompt_marker in decoded:
                     break
             except OSError:
                 break
 
-        return ''.join(output)
+        return "".join(output)
 
     def close(self, session_id: str) -> bool:
         """Close a session.
@@ -198,14 +186,16 @@ class SessionManager:
             except OSError:
                 status = "stopped"
 
-            result.append({
-                "session_id": session.id,
-                "pid": session.pid,
-                "cwd": session.cwd,
-                "env": session.env,
-                "status": status,
-                "created_at": session.created_at
-            })
+            result.append(
+                {
+                    "session_id": session.id,
+                    "pid": session.pid,
+                    "cwd": session.cwd,
+                    "env": session.env,
+                    "status": status,
+                    "created_at": session.created_at,
+                }
+            )
         return result
 
     def close_all(self):

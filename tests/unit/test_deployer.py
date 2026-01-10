@@ -3,8 +3,6 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from do_app_sandbox.types import SandboxMode, ServiceConfig
 
 
@@ -15,17 +13,10 @@ class TestWorkerSpecGeneration:
         """Worker mode generates worker spec (no HTTP port)."""
         from do_app_sandbox.deployer import Deployer
 
-        deployer = Deployer(
-            registry="test-registry",
-            region="nyc1",
-            instance_size="apps-s-1vcpu-1gb"
-        )
+        deployer = Deployer(registry="test-registry", region="nyc1", instance_size="apps-s-1vcpu-1gb")
 
         spec, token = deployer._generate_app_spec(
-            name="test-sandbox",
-            image="python",
-            component_type="worker",
-            mode=SandboxMode.WORKER
+            name="test-sandbox", image="python", component_type="worker", mode=SandboxMode.WORKER
         )
 
         # Worker spec should have workers section, not services
@@ -36,15 +27,11 @@ class TestWorkerSpecGeneration:
 
     def test_worker_spec_has_correct_image(self):
         """Worker spec uses worker image repository."""
-        from do_app_sandbox.deployer import Deployer, IMAGE_REPOS
+        from do_app_sandbox.deployer import IMAGE_REPOS, Deployer
 
         deployer = Deployer(registry="test-registry")
 
-        spec, _ = deployer._generate_app_spec(
-            name="test-sandbox",
-            image="python",
-            mode=SandboxMode.WORKER
-        )
+        spec, _ = deployer._generate_app_spec(name="test-sandbox", image="python", mode=SandboxMode.WORKER)
 
         # Should use sandbox-python (worker), not sandbox-python-service
         assert IMAGE_REPOS["python"] in spec
@@ -58,16 +45,9 @@ class TestServiceSpecGeneration:
         """Service mode generates streaming service spec."""
         from do_app_sandbox.deployer import Deployer
 
-        deployer = Deployer(
-            registry="test-registry",
-            region="sfo3"
-        )
+        deployer = Deployer(registry="test-registry", region="sfo3")
 
-        spec, token = deployer._generate_app_spec(
-            name="test-sandbox",
-            image="python",
-            mode=SandboxMode.SERVICE
-        )
+        spec, token = deployer._generate_app_spec(name="test-sandbox", image="python", mode=SandboxMode.SERVICE)
 
         # Service spec should have services section
         assert "services:" in spec
@@ -76,15 +56,11 @@ class TestServiceSpecGeneration:
 
     def test_service_spec_has_correct_image(self):
         """Service spec uses service image repository."""
-        from do_app_sandbox.deployer import Deployer, SERVICE_IMAGE_REPOS
+        from do_app_sandbox.deployer import SERVICE_IMAGE_REPOS, Deployer
 
         deployer = Deployer(registry="test-registry")
 
-        spec, _ = deployer._generate_app_spec(
-            name="test-sandbox",
-            image="python",
-            mode=SandboxMode.SERVICE
-        )
+        spec, _ = deployer._generate_app_spec(name="test-sandbox", image="python", mode=SandboxMode.SERVICE)
 
         # Should use sandbox-python-service
         assert SERVICE_IMAGE_REPOS["python"] in spec
@@ -99,17 +75,9 @@ class TestServiceTokenGeneration:
 
         deployer = Deployer(registry="test-registry")
 
-        _, token1 = deployer._generate_app_spec(
-            name="test-1",
-            image="python",
-            mode=SandboxMode.SERVICE
-        )
+        _, token1 = deployer._generate_app_spec(name="test-1", image="python", mode=SandboxMode.SERVICE)
 
-        _, token2 = deployer._generate_app_spec(
-            name="test-2",
-            image="python",
-            mode=SandboxMode.SERVICE
-        )
+        _, token2 = deployer._generate_app_spec(name="test-2", image="python", mode=SandboxMode.SERVICE)
 
         assert token1 is not None
         assert token2 is not None
@@ -124,10 +92,7 @@ class TestServiceTokenGeneration:
         config = ServiceConfig(token="my-custom-token-123")
 
         _, token = deployer._generate_app_spec(
-            name="test-sandbox",
-            image="python",
-            mode=SandboxMode.SERVICE,
-            service_config=config
+            name="test-sandbox", image="python", mode=SandboxMode.SERVICE, service_config=config
         )
 
         assert token == "my-custom-token-123"
@@ -142,11 +107,7 @@ class TestServiceSpecEnvToken:
 
         deployer = Deployer(registry="test-registry")
 
-        spec, token = deployer._generate_app_spec(
-            name="test-sandbox",
-            image="python",
-            mode=SandboxMode.SERVICE
-        )
+        spec, token = deployer._generate_app_spec(name="test-sandbox", image="python", mode=SandboxMode.SERVICE)
 
         assert "SANDBOX_API_TOKEN" in spec
         assert token in spec  # Token value should be in spec
@@ -157,11 +118,7 @@ class TestServiceSpecEnvToken:
 
         deployer = Deployer(registry="test-registry")
 
-        spec, _ = deployer._generate_app_spec(
-            name="test-sandbox",
-            image="python",
-            mode=SandboxMode.SERVICE
-        )
+        spec, _ = deployer._generate_app_spec(name="test-sandbox", image="python", mode=SandboxMode.SERVICE)
 
         # Check env var config
         assert "type: SECRET" in spec
@@ -177,11 +134,7 @@ class TestServiceSpecHealthCheck:
 
         deployer = Deployer(registry="test-registry")
 
-        spec, _ = deployer._generate_app_spec(
-            name="test-sandbox",
-            image="python",
-            mode=SandboxMode.SERVICE
-        )
+        spec, _ = deployer._generate_app_spec(name="test-sandbox", image="python", mode=SandboxMode.SERVICE)
 
         assert "health_check:" in spec
         assert "/health" in spec
@@ -243,7 +196,7 @@ class TestDeployerInit:
             registry_type="GHCR",
             region="sfo3",
             instance_size="apps-s-2vcpu-4gb",
-            api_token="test-token"
+            api_token="test-token",
         )
 
         assert deployer.registry == "my-registry"
@@ -312,23 +265,27 @@ class TestCreateApp:
         mock_tempfile.return_value.__enter__ = MagicMock(return_value=mock_file)
         mock_tempfile.return_value.__exit__ = MagicMock(return_value=False)
 
-        mock_run_doctl.return_value = (0, json.dumps([{
-            "id": "app-123",
-            "spec": {"name": "test-sandbox"},
-            "active_deployment": {"phase": "PENDING"},
-            "live_url": "https://test-sandbox.ondigitalocean.app",
-            "region": {"slug": "nyc1"}
-        }]), "")
+        mock_run_doctl.return_value = (
+            0,
+            json.dumps(
+                [
+                    {
+                        "id": "app-123",
+                        "spec": {"name": "test-sandbox"},
+                        "active_deployment": {"phase": "PENDING"},
+                        "live_url": "https://test-sandbox.ondigitalocean.app",
+                        "region": {"slug": "nyc1"},
+                    }
+                ]
+            ),
+            "",
+        )
 
         mock_path.return_value.unlink = MagicMock()
 
         deployer = Deployer(registry="test-registry")
 
-        app_info, token = deployer.create_app(
-            name="test-sandbox",
-            image="python",
-            mode=SandboxMode.SERVICE
-        )
+        app_info, token = deployer.create_app(name="test-sandbox", image="python", mode=SandboxMode.SERVICE)
 
         assert isinstance(app_info, AppInfo)
         assert app_info.app_id == "app-123"
@@ -346,20 +303,17 @@ class TestCreateApp:
         mock_tempfile.return_value.__enter__ = MagicMock(return_value=mock_file)
         mock_tempfile.return_value.__exit__ = MagicMock(return_value=False)
 
-        mock_run_doctl.return_value = (0, json.dumps([{
-            "id": "app-456",
-            "spec": {"name": "worker-sandbox"}
-        }]), "")
+        mock_run_doctl.return_value = (
+            0,
+            json.dumps([{"id": "app-456", "spec": {"name": "worker-sandbox"}}]),
+            "",
+        )
 
         mock_path.return_value.unlink = MagicMock()
 
         deployer = Deployer(registry="test-registry")
 
-        app_info, token = deployer.create_app(
-            name="worker-sandbox",
-            image="python",
-            mode=SandboxMode.WORKER
-        )
+        app_info, token = deployer.create_app(name="worker-sandbox", image="python", mode=SandboxMode.WORKER)
 
         assert token is None  # Worker mode has no token
 
@@ -369,15 +323,11 @@ class TestNodeServiceSpec:
 
     def test_node_service_spec_uses_correct_image(self):
         """Node service spec uses sandbox-node-service image."""
-        from do_app_sandbox.deployer import Deployer, SERVICE_IMAGE_REPOS
+        from do_app_sandbox.deployer import SERVICE_IMAGE_REPOS, Deployer
 
         deployer = Deployer(registry="test-registry")
 
-        spec, _ = deployer._generate_app_spec(
-            name="node-sandbox",
-            image="node",
-            mode=SandboxMode.SERVICE
-        )
+        spec, _ = deployer._generate_app_spec(name="node-sandbox", image="node", mode=SandboxMode.SERVICE)
 
         assert SERVICE_IMAGE_REPOS["node"] in spec
         assert "sandbox-node-service" in spec

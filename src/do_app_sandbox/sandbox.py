@@ -10,21 +10,21 @@ Supports two deployment modes:
 
 import json
 import os
+import shutil
 import subprocess
 import time
 import uuid
-import shutil
-from typing import Dict, Generator, List, Optional, TYPE_CHECKING, Union
+from collections.abc import Generator
+from typing import TYPE_CHECKING, Optional
 from urllib.parse import urlparse, urlunparse
 
 from .deployer import DEFAULT_IMAGE_OWNER, DEFAULT_INSTANCE_SIZE, DEFAULT_REGION, Deployer
 from .exceptions import (
     SandboxCreationError,
+    SandboxHibernatedError,
     SandboxNotFoundError,
     SandboxNotReadyError,
-    SandboxHibernatedError,
     ServiceNotAvailableError,
-    SnapshotError,
 )
 from .executor import Executor
 from .filesystem import FileSystem
@@ -56,7 +56,7 @@ ENV_REGION = "APP_SANDBOX_REGION"
 def _run_doctl(
     args: list[str],
     timeout: int = 120,
-    api_token: Optional[str] = None,
+    api_token: str | None = None,
 ) -> tuple[int, str, str]:
     """Run a doctl command without requiring Deployer.
 
@@ -90,7 +90,7 @@ def _run_doctl(
         return -1, "", str(e)
 
 
-def _get_app_info(app_id: str, api_token: Optional[str] = None) -> dict:
+def _get_app_info(app_id: str, api_token: str | None = None) -> dict:
     """Get app info directly via doctl without requiring Deployer.
 
     Args:
@@ -129,7 +129,7 @@ def _get_app_info(app_id: str, api_token: Optional[str] = None) -> dict:
         raise SandboxNotFoundError(f"Failed to parse app info: {e}")
 
 
-def _delete_app(app_id: str, api_token: Optional[str] = None) -> bool:
+def _delete_app(app_id: str, api_token: str | None = None) -> bool:
     """Delete an app directly via doctl without requiring Deployer.
 
     Args:
@@ -200,14 +200,14 @@ class Sandbox:
         self,
         app_id: str,
         component: str = "sandbox",
-        api_token: Optional[str] = None,
-        spaces_config: Optional[Union[SpacesConfig, Dict]] = None,
-        _deployer: Optional[Deployer] = None,
+        api_token: str | None = None,
+        spaces_config: SpacesConfig | dict | None = None,
+        _deployer: Deployer | None = None,
         _mode: SandboxMode = SandboxMode.WORKER,
-        _service_config: Optional[ServiceConfig] = None,
-        _service_token: Optional[str] = None,
+        _service_config: ServiceConfig | None = None,
+        _service_token: str | None = None,
         _image: str = "python",
-        _hibernation_config: Optional[HibernationConfig] = None,
+        _hibernation_config: HibernationConfig | None = None,
     ):
         """Initialize a Sandbox instance.
 
@@ -231,7 +231,7 @@ class Sandbox:
         self._component = component
         self._api_token = api_token
         self._deployer = _deployer
-        self._url: Optional[str] = None
+        self._url: str | None = None
 
         # Mode and service configuration
         self._mode = _mode
@@ -255,7 +255,7 @@ class Sandbox:
             self._executor = None  # Service mode uses HTTP client
 
         # Initialize Spaces client if configured
-        self._spaces_client: Optional[SpacesClient] = None
+        self._spaces_client: SpacesClient | None = None
         self._spaces_config = self._resolve_spaces_config(spaces_config)
         if self._spaces_config:
             try:
@@ -277,9 +277,7 @@ class Sandbox:
             self._filesystem = None
             self._process = None
 
-    def _resolve_spaces_config(
-        self, config: Optional[Union[SpacesConfig, Dict]]
-    ) -> Optional[SpacesConfig]:
+    def _resolve_spaces_config(self, config: SpacesConfig | dict | None) -> SpacesConfig | None:
         """Resolve SpacesConfig from parameter, dict, or environment.
 
         Args:
@@ -311,17 +309,17 @@ class Sandbox:
         cls,
         *,
         image: str,
-        name: Optional[str] = None,
-        region: Optional[str] = None,
-        instance_size: Optional[str] = None,
+        name: str | None = None,
+        region: str | None = None,
+        instance_size: str | None = None,
         mode: SandboxMode = SandboxMode.WORKER,
-        service_config: Optional[ServiceConfig] = None,
-        hibernation_config: Optional[HibernationConfig] = None,
-        registry: Optional[str] = None,
-        api_token: Optional[str] = None,
+        service_config: ServiceConfig | None = None,
+        hibernation_config: HibernationConfig | None = None,
+        registry: str | None = None,
+        api_token: str | None = None,
         wait_ready: bool = True,
         timeout: int = 600,
-        spaces_config: Optional[Union[SpacesConfig, Dict]] = None,
+        spaces_config: SpacesConfig | dict | None = None,
     ) -> "Sandbox":
         """Create a new sandbox environment.
 
@@ -407,11 +405,7 @@ class Sandbox:
 
         # Create the app
         app_info, service_token = deployer.create_app(
-            name,
-            image,
-            component_type=component_type,
-            mode=mode,
-            service_config=service_config
+            name, image, component_type=component_type, mode=mode, service_config=service_config
         )
 
         # Wait for ready if requested
@@ -440,8 +434,8 @@ class Sandbox:
         cls,
         app_id: str,
         component: str = "sandbox",
-        api_token: Optional[str] = None,
-        spaces_config: Optional[Union[SpacesConfig, Dict]] = None,
+        api_token: str | None = None,
+        spaces_config: SpacesConfig | dict | None = None,
     ) -> "Sandbox":
         """Connect to an existing sandbox by app ID.
 
@@ -506,8 +500,8 @@ class Sandbox:
     def exec(
         self,
         command: str,
-        env: Optional[dict[str, str]] = None,
-        cwd: Optional[str] = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
         timeout: int = 120,
     ) -> CommandResult:
         """Execute a command in the sandbox.
@@ -543,8 +537,8 @@ class Sandbox:
     def launch_process(
         self,
         command: str,
-        cwd: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> int:
         """Launch a background process.
 
@@ -565,7 +559,7 @@ class Sandbox:
         """
         return self._process.launch(command, cwd=cwd, env=env)
 
-    def list_processes(self, pattern: Optional[str] = None) -> list[ProcessInfo]:
+    def list_processes(self, pattern: str | None = None) -> list[ProcessInfo]:
         """List running processes.
 
         Args:
@@ -669,15 +663,12 @@ class Sandbox:
                 return
 
             if status in ("ERROR", "FAILED"):
-                raise SandboxNotReadyError(
-                    f"Sandbox deployment failed with status: {status}"
-                )
+                raise SandboxNotReadyError(f"Sandbox deployment failed with status: {status}")
 
             time.sleep(poll_interval)
 
         raise SandboxNotReadyError(
-            f"Timed out waiting for sandbox to be ready after {timeout}s. "
-            f"Last status: {last_status}"
+            f"Timed out waiting for sandbox to be ready after {timeout}s. " f"Last status: {last_status}"
         )
 
     def __repr__(self) -> str:
@@ -700,23 +691,17 @@ class Sandbox:
         """Get or create the service client for HTTP API mode."""
         if self._service_client is None:
             from .service_client import SandboxServiceClient
+
             base_url = self.get_url()
             if not self._service_token:
-                raise ServiceNotAvailableError(
-                    "Service token not available. Sandbox may not be in service mode."
-                )
-            self._service_client = SandboxServiceClient(
-                base_url=base_url,
-                token=self._service_token
-            )
+                raise ServiceNotAvailableError("Service token not available. Sandbox may not be in service mode.")
+            self._service_client = SandboxServiceClient(base_url=base_url, token=self._service_token)
         return self._service_client
 
     def _ensure_awake(self) -> None:
         """Ensure sandbox is not hibernated before operations."""
         if self._state == SandboxState.HIBERNATED:
-            raise SandboxHibernatedError(
-                "Sandbox is hibernated. Use Sandbox.wake() to restore it."
-            )
+            raise SandboxHibernatedError("Sandbox is hibernated. Use Sandbox.wake() to restore it.")
 
     def _record_activity(self) -> None:
         """Record activity to reset the idle timer."""
@@ -759,7 +744,7 @@ class Sandbox:
     def exec_stream(
         self,
         command: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         cwd: str = "/workspace",
         timeout: int = 120,
     ) -> Generator[StreamEvent, None, None]:
@@ -789,8 +774,7 @@ class Sandbox:
         """
         if self._mode != SandboxMode.SERVICE:
             raise ServiceNotAvailableError(
-                "exec_stream() requires service mode. "
-                "Create sandbox with mode=SandboxMode.SERVICE"
+                "exec_stream() requires service mode. Create sandbox with mode=SandboxMode.SERVICE"
             )
 
         self._ensure_awake()
@@ -835,19 +819,13 @@ class Sandbox:
         """
         if self._mode != SandboxMode.SERVICE:
             raise ServiceNotAvailableError(
-                "Port exposure requires service mode. "
-                "Create sandbox with mode=SandboxMode.SERVICE"
+                "Port exposure requires service mode. Create sandbox with mode=SandboxMode.SERVICE"
             )
 
         base_url = self.get_url()
         proxy_url = f"{base_url}/proxy/{port}"
 
-        return ExposedPort(
-            port=port,
-            url=proxy_url,
-            protocol="https",
-            created_at=time.time()
-        )
+        return ExposedPort(port=port, url=proxy_url, protocol="https", created_at=time.time())
 
     # =========================================================================
     # Git operations
@@ -857,9 +835,9 @@ class Sandbox:
         self,
         url: str,
         path: str = "/workspace",
-        branch: Optional[str] = None,
+        branch: str | None = None,
         depth: int = 1,
-        credentials: Optional[GitCredentials] = None,
+        credentials: GitCredentials | None = None,
     ) -> CommandResult:
         """Clone a git repository into the sandbox.
 
@@ -903,16 +881,12 @@ class Sandbox:
                 key_path = "/tmp/git_key"
                 self.filesystem.write_file(key_path, credentials.ssh_key)
                 self.exec(f"chmod 600 {key_path}")
-                env = {
-                    "GIT_SSH_COMMAND": f"ssh -i {key_path} -o StrictHostKeyChecking=no"
-                }
+                env = {"GIT_SSH_COMMAND": f"ssh -i {key_path} -o StrictHostKeyChecking=no"}
             elif credentials.token:
                 # Embed token in HTTPS URL
                 parsed = urlparse(url)
                 auth = f"{credentials.username or 'git'}:{credentials.token}"
-                clone_url = urlunparse(
-                    parsed._replace(netloc=f"{auth}@{parsed.netloc}")
-                )
+                clone_url = urlunparse(parsed._replace(netloc=f"{auth}@{parsed.netloc}"))
 
         cmd_parts.extend([clone_url, path])
         result = self.exec(" ".join(cmd_parts), env=env)
@@ -929,10 +903,10 @@ class Sandbox:
 
     def create_snapshot(
         self,
-        snapshot_id: Optional[str] = None,
-        paths: Optional[List[str]] = None,
-        description: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
+        snapshot_id: str | None = None,
+        paths: list[str] | None = None,
+        description: str | None = None,
+        tags: dict[str, str] | None = None,
         timeout: int = 600,
     ) -> SnapshotMetadata:
         """Create a snapshot of sandbox filesystem state.
@@ -965,6 +939,7 @@ class Sandbox:
         self._ensure_awake()
 
         from .snapshot import SnapshotManager
+
         snapshot_mgr = SnapshotManager(self._spaces_config)
         return snapshot_mgr.create_snapshot(
             sandbox=self,
@@ -972,7 +947,7 @@ class Sandbox:
             paths=paths,
             description=description,
             tags=tags,
-            timeout=timeout
+            timeout=timeout,
         )
 
     def restore_snapshot(
@@ -998,12 +973,10 @@ class Sandbox:
         self._ensure_awake()
 
         from .snapshot import SnapshotManager
+
         snapshot_mgr = SnapshotManager(self._spaces_config)
         return snapshot_mgr.restore_snapshot(
-            sandbox=self,
-            snapshot_id=snapshot_id,
-            target_path=target_path,
-            timeout=timeout
+            sandbox=self, snapshot_id=snapshot_id, target_path=target_path, timeout=timeout
         )
 
     # =========================================================================
@@ -1045,7 +1018,7 @@ class Sandbox:
         self.create_snapshot(
             snapshot_id=snapshot_id,
             paths=["/workspace", "/home", "/tmp"],
-            description=f"Hibernation snapshot for {self._app_id}"
+            description=f"Hibernation snapshot for {self._app_id}",
         )
 
         # Store metadata for restoration
@@ -1055,7 +1028,7 @@ class Sandbox:
             mode=self._mode,
             service_config=self._service_config,
             hibernated_at=time.time(),
-            metadata={"app_id": self._app_id}
+            metadata={"app_id": self._app_id},
         )
 
         # Delete the sandbox (not just scale to 0)
@@ -1065,12 +1038,7 @@ class Sandbox:
         return hibernated
 
     @classmethod
-    def wake(
-        cls,
-        hibernated: HibernatedSandbox,
-        pool: Optional["SandboxManager"] = None,
-        **create_kwargs
-    ) -> "Sandbox":
+    def wake(cls, hibernated: HibernatedSandbox, pool: Optional["SandboxManager"] = None, **create_kwargs) -> "Sandbox":
         """Wake a hibernated sandbox.
 
         Creates a new sandbox and restores the hibernation snapshot.
@@ -1100,7 +1068,7 @@ class Sandbox:
                 image=hibernated.image,
                 mode=hibernated.mode,
                 service_config=hibernated.service_config,
-                **create_kwargs
+                **create_kwargs,
             )
 
         # Restore snapshot

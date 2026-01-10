@@ -6,12 +6,11 @@ Tests the SDK's ability to connect to an existing App Platform app
 and run diagnostic commands, as described in docs/troubleshooting_existing_apps.md
 """
 
-import sys
-import os
 import json
-from dataclasses import dataclass, asdict
+import os
+import sys
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
@@ -21,18 +20,19 @@ from do_app_sandbox import Sandbox
 @dataclass
 class TestResult:
     """Result of the existing app connection test."""
+
     test_name: str = "Connect to Existing App"
     app_id: str = ""
     component: str = ""
     connected: bool = False
-    whoami: Optional[str] = None
-    pwd: Optional[str] = None
-    uname: Optional[str] = None
-    ps_aux: Optional[str] = None
-    df_h: Optional[str] = None
-    env_count: Optional[int] = None
-    file_list: Optional[list] = None
-    error: Optional[str] = None
+    whoami: str | None = None
+    pwd: str | None = None
+    uname: str | None = None
+    ps_aux: str | None = None
+    df_h: str | None = None
+    env_count: int | None = None
+    file_list: list | None = None
+    error: str | None = None
     timestamp: str = ""
 
 

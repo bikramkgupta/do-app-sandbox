@@ -2,7 +2,7 @@
 
 import os
 import uuid
-from typing import Callable, Optional, Tuple
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 from .exceptions import SpacesNotConfiguredError
@@ -54,7 +54,7 @@ class SpacesClient:
         self._client = None
         self.endpoint_url, self.addressing_style = self._resolve_endpoint()
 
-    def _resolve_endpoint(self) -> Tuple[str, str]:
+    def _resolve_endpoint(self) -> tuple[str, str]:
         """Resolve the endpoint URL and addressing style.
 
         If a bucket-scoped endpoint is provided (e.g. https://bucket.region.digitaloceanspaces.com),
@@ -122,7 +122,7 @@ class SpacesClient:
         self,
         local_path: str,
         key: str,
-        progress_callback: Optional[Callable[[int], None]] = None,
+        progress_callback: Callable[[int], None] | None = None,
     ) -> str:
         """Upload a file to Spaces.
 
@@ -134,8 +134,6 @@ class SpacesClient:
         Returns:
             Object key
         """
-        file_size = os.path.getsize(local_path)
-
         callback = None
         if progress_callback:
             transferred = [0]
@@ -157,7 +155,7 @@ class SpacesClient:
         self,
         key: str,
         local_path: str,
-        progress_callback: Optional[Callable[[int], None]] = None,
+        progress_callback: Callable[[int], None] | None = None,
     ) -> str:
         """Download a file from Spaces.
 
@@ -241,7 +239,7 @@ class SpacesClient:
         except Exception:
             return False
 
-    def get_object_size(self, key: str) -> Optional[int]:
+    def get_object_size(self, key: str) -> int | None:
         """Get the size of an object in Spaces.
 
         Args:
@@ -256,12 +254,7 @@ class SpacesClient:
         except Exception:
             return None
 
-    def put_object(
-        self,
-        key: str,
-        content: bytes,
-        content_type: str = "application/octet-stream"
-    ) -> None:
+    def put_object(self, key: str, content: bytes, content_type: str = "application/octet-stream") -> None:
         """Upload content directly to Spaces.
 
         Args:
@@ -269,12 +262,7 @@ class SpacesClient:
             content: Content to upload
             content_type: MIME type of content
         """
-        self.client.put_object(
-            Bucket=self.bucket,
-            Key=key,
-            Body=content,
-            ContentType=content_type
-        )
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=content, ContentType=content_type)
 
     def get_object(self, key: str) -> bytes:
         """Download content directly from Spaces.
@@ -325,7 +313,7 @@ def get_large_file_threshold() -> int:
     return DEFAULT_LARGE_FILE_THRESHOLD
 
 
-def create_spaces_config_from_env() -> Optional[SpacesConfig]:
+def create_spaces_config_from_env() -> SpacesConfig | None:
     """Create SpacesConfig from environment variables.
 
     Returns:

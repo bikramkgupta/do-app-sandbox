@@ -1,21 +1,20 @@
 """Tests for types.py - Type and Dataclass Tests."""
 
 import time
-import pytest
 
 from do_app_sandbox.types import (
+    CommandResult,
+    ExposedPort,
+    FileInfo,
+    GitCredentials,
+    HibernatedSandbox,
+    HibernationConfig,
+    ProcessInfo,
     SandboxMode,
     SandboxState,
     ServiceConfig,
-    HibernationConfig,
-    StreamEvent,
     SnapshotMetadata,
-    HibernatedSandbox,
-    GitCredentials,
-    ExposedPort,
-    CommandResult,
-    ProcessInfo,
-    FileInfo,
+    StreamEvent,
 )
 
 
@@ -82,7 +81,7 @@ class TestServiceConfig:
             proxy_ports=[4000],
             enable_file_api=False,
             enable_sessions=False,
-            token="my-token"
+            token="my-token",
         )
         assert config.api_port == 9000
         assert config.proxy_ports == [4000]
@@ -183,7 +182,7 @@ class TestSnapshotMetadata:
             size_bytes=1024 * 1024,  # 1 MB
             paths=["/workspace"],
             description="Test snapshot",
-            tags={"env": "test"}
+            tags={"env": "test"},
         )
         assert meta.snapshot_id == "snap-abc123"
         assert meta.created_at == now
@@ -200,7 +199,7 @@ class TestSnapshotMetadata:
             created_at=time.time(),
             sandbox_image="node",
             size_bytes=2048,
-            paths=["/app"]
+            paths=["/app"],
         )
         assert meta.description is None
         assert meta.tags == {}
@@ -212,7 +211,7 @@ class TestSnapshotMetadata:
             created_at=time.time(),
             sandbox_image="python",
             size_bytes=5 * 1024 * 1024,  # 5 MB
-            paths=["/workspace"]
+            paths=["/workspace"],
         )
         repr_str = repr(meta)
         assert "5.0MB" in repr_str or "5MB" in repr_str
@@ -231,7 +230,7 @@ class TestHibernatedSandbox:
             mode=SandboxMode.SERVICE,
             service_config=config,
             hibernated_at=now,
-            metadata={"app_id": "test-app"}
+            metadata={"app_id": "test-app"},
         )
         assert hibernated.snapshot_id == "hibernate-abc123"
         assert hibernated.image == "python"
@@ -247,7 +246,7 @@ class TestHibernatedSandbox:
             image="node",
             mode=SandboxMode.WORKER,
             service_config=None,
-            hibernated_at=time.time()
+            hibernated_at=time.time(),
         )
         assert hibernated.mode == SandboxMode.WORKER
         assert hibernated.service_config is None
@@ -259,7 +258,7 @@ class TestHibernatedSandbox:
             image="python",
             mode=SandboxMode.SERVICE,
             service_config=None,
-            hibernated_at=time.time()
+            hibernated_at=time.time(),
         )
         repr_str = repr(hibernated)
         assert "hibernate-test" in repr_str
@@ -304,7 +303,7 @@ class TestExposedPort:
             port=3000,
             url="https://sandbox-xxx.ondigitalocean.app/proxy/3000",
             protocol="https",
-            created_at=time.time()
+            created_at=time.time(),
         )
         assert port.port == 3000
         assert port.url == "https://sandbox-xxx.ondigitalocean.app/proxy/3000"
@@ -349,13 +348,7 @@ class TestProcessInfo:
 
     def test_process_info_creation(self):
         """ProcessInfo stores all fields."""
-        info = ProcessInfo(
-            pid=12345,
-            command="python server.py",
-            status="running",
-            cpu="5%",
-            memory="50MB"
-        )
+        info = ProcessInfo(pid=12345, command="python server.py", status="running", cpu="5%", memory="50MB")
         assert info.pid == 12345
         assert info.command == "python server.py"
         assert info.status == "running"
@@ -373,16 +366,12 @@ class TestFileInfo:
             path="/workspace/test.py",
             is_dir=False,
             size=1024,
-            permissions="rw-r--r--"
+            permissions="rw-r--r--",
         )
         assert info.name == "test.py"
         assert info.is_dir is False
 
     def test_file_info_directory(self):
         """FileInfo for a directory."""
-        info = FileInfo(
-            name="src",
-            path="/workspace/src",
-            is_dir=True
-        )
+        info = FileInfo(name="src", path="/workspace/src", is_dir=True)
         assert info.is_dir is True

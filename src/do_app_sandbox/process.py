@@ -7,7 +7,6 @@ processes on the remote sandbox container.
 import shlex
 import time
 import uuid
-from typing import Optional
 
 from .exceptions import CommandExecutionError
 from .executor import Executor
@@ -29,8 +28,8 @@ class ProcessManager:
     def launch(
         self,
         command: str,
-        cwd: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> int:
         """Launch a background process.
 
@@ -67,9 +66,7 @@ class ProcessManager:
 
         result = self._executor.execute(launch_cmd, cwd=cwd)
         if not result.success:
-            raise CommandExecutionError(
-                f"Failed to launch process: {result.stderr}"
-            )
+            raise CommandExecutionError(f"Failed to launch process: {result.stderr}")
 
         # Parse the PID from output
         try:
@@ -79,7 +76,7 @@ class ProcessManager:
         except (ValueError, IndexError) as e:
             raise CommandExecutionError(f"Failed to get PID: {result.stdout}") from e
 
-    def list_processes(self, pattern: Optional[str] = None) -> list[ProcessInfo]:
+    def list_processes(self, pattern: str | None = None) -> list[ProcessInfo]:
         """List running processes.
 
         Args:
@@ -128,7 +125,7 @@ class ProcessManager:
 
         return processes
 
-    def get_process(self, pid: int) -> Optional[ProcessInfo]:
+    def get_process(self, pid: int) -> ProcessInfo | None:
         """Get information about a specific process.
 
         Args:
@@ -165,9 +162,7 @@ class ProcessManager:
         Returns:
             True if the process is running
         """
-        result = self._executor.execute(
-            f'kill -0 {pid} 2>/dev/null && echo "RUNNING" || echo "NOT_RUNNING"'
-        )
+        result = self._executor.execute(f'kill -0 {pid} 2>/dev/null && echo "RUNNING" || echo "NOT_RUNNING"')
         return "RUNNING" in result.stdout and "NOT_RUNNING" not in result.stdout
 
     def kill(self, pid: int, signal: int = 15) -> bool:
@@ -235,7 +230,7 @@ class ProcessManager:
             time.sleep(0.5)
         return False
 
-    def get_output(self, pid: int) -> Optional[str]:
+    def get_output(self, pid: int) -> str | None:
         """Get the output log of a launched process.
 
         This only works for processes launched via this manager.
@@ -247,7 +242,7 @@ class ProcessManager:
             The log output if available, None otherwise
         """
         # Find the log file - we need to search for it
-        result = self._executor.execute(f"ls /tmp/sandbox_proc_*.log 2>/dev/null")
+        result = self._executor.execute("ls /tmp/sandbox_proc_*.log 2>/dev/null")
         if not result.success:
             return None
 

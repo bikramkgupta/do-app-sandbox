@@ -2,8 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Dict, Any, List, Literal
-
+from typing import Any
 
 # =============================================================================
 # Enums
@@ -36,10 +35,10 @@ class ServiceConfig:
     """Configuration for service mode sandboxes."""
 
     api_port: int = 8080
-    proxy_ports: List[int] = field(default_factory=lambda: [3000, 5000, 8000])
+    proxy_ports: list[int] = field(default_factory=lambda: [3000, 5000, 8000])
     enable_file_api: bool = True
     enable_sessions: bool = True
-    token: Optional[str] = None  # Auto-generated if not provided
+    token: str | None = None  # Auto-generated if not provided
 
     def __repr__(self) -> str:
         return f"ServiceConfig(api_port={self.api_port}, proxy_ports={self.proxy_ports})"
@@ -97,9 +96,9 @@ class SnapshotMetadata:
     created_at: float
     sandbox_image: str
     size_bytes: int
-    paths: List[str]
-    description: Optional[str] = None
-    tags: Dict[str, str] = field(default_factory=dict)
+    paths: list[str]
+    description: str | None = None
+    tags: dict[str, str] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         size_mb = self.size_bytes / (1024 * 1024)
@@ -113,9 +112,9 @@ class HibernatedSandbox:
     snapshot_id: str
     image: str
     mode: SandboxMode
-    service_config: Optional[ServiceConfig]
+    service_config: ServiceConfig | None
     hibernated_at: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         return f"HibernatedSandbox(snapshot={self.snapshot_id!r}, image={self.image!r})"
@@ -130,9 +129,9 @@ class HibernatedSandbox:
 class GitCredentials:
     """Credentials for private repository access."""
 
-    username: Optional[str] = None
-    token: Optional[str] = None  # Personal Access Token for HTTPS
-    ssh_key: Optional[str] = None  # Private key content for SSH
+    username: str | None = None
+    token: str | None = None  # Personal Access Token for HTTPS
+    ssh_key: str | None = None  # Private key content for SSH
 
     def __repr__(self) -> str:
         auth_type = "ssh" if self.ssh_key else "token" if self.token else "none"
@@ -176,7 +175,9 @@ class CommandResult:
         return self.exit_code == 0
 
     def __repr__(self) -> str:
-        return f"CommandResult(exit_code={self.exit_code}, stdout={self.stdout[:50]!r}{'...' if len(self.stdout) > 50 else ''}, stderr={self.stderr[:50]!r}{'...' if len(self.stderr) > 50 else ''})"
+        stdout_preview = f"{self.stdout[:50]!r}{'...' if len(self.stdout) > 50 else ''}"
+        stderr_preview = f"{self.stderr[:50]!r}{'...' if len(self.stderr) > 50 else ''}"
+        return f"CommandResult(exit_code={self.exit_code}, stdout={stdout_preview}, stderr={stderr_preview})"
 
 
 @dataclass
@@ -186,8 +187,8 @@ class ProcessInfo:
     pid: int
     command: str
     status: str
-    cpu: Optional[str] = None
-    memory: Optional[str] = None
+    cpu: str | None = None
+    memory: str | None = None
 
     def __repr__(self) -> str:
         return f"ProcessInfo(pid={self.pid}, command={self.command!r}, status={self.status!r})"
@@ -200,8 +201,8 @@ class FileInfo:
     name: str
     path: str
     is_dir: bool
-    size: Optional[int] = None
-    permissions: Optional[str] = None
+    size: int | None = None
+    permissions: str | None = None
 
     def __repr__(self) -> str:
         type_str = "dir" if self.is_dir else "file"
@@ -215,10 +216,10 @@ class AppInfo:
     app_id: str
     name: str
     status: str
-    url: Optional[str] = None
-    region: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    url: str | None = None
+    region: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
     def __repr__(self) -> str:
         return f"AppInfo(id={self.app_id}, name={self.name!r}, status={self.status!r})"
@@ -234,7 +235,7 @@ class ValidationResult:
     image_built: bool = False
     container_started: bool = False
     health_check_passed: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def is_valid(self) -> bool:
@@ -265,10 +266,10 @@ class ImageInfo:
     image_url: str
     status: str  # "validating" | "validated" | "failed"
     created_at: str
-    validated_at: Optional[str] = None
-    validation_pid: Optional[int] = None
-    validation_log: Optional[str] = None
-    validation_results: Optional[ValidationResult] = None
+    validated_at: str | None = None
+    validation_pid: int | None = None
+    validation_log: str | None = None
+    validation_results: ValidationResult | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -285,9 +286,9 @@ class SpacesConfig:
 
     bucket: str
     region: str
-    access_key: Optional[str] = None
-    secret_key: Optional[str] = None
-    endpoint: Optional[str] = None
+    access_key: str | None = None
+    secret_key: str | None = None
+    endpoint: str | None = None
 
     def __repr__(self) -> str:
         return f"SpacesConfig(bucket={self.bucket!r}, region={self.region!r}, endpoint={self.endpoint!r})"

@@ -8,6 +8,124 @@ Algorithms implemented:
 2. PID Controller - Control theory approach (Kubernetes-style)
 3. Predictive Scaling - Time-series based forecasting
 4. Hybrid Adaptive - Combines prediction with reactive scaling
+5. Queuing Theory (M/M/c) - Erlang C based optimal sizing
+
+================================================================================
+STATUS: NOT INTEGRATED
+================================================================================
+
+These algorithms are COMPLETE and TESTED but NOT YET wired into SandboxManager.
+Currently, SandboxManager uses a fixed `target_ready` value from PoolConfig.
+
+To enable adaptive scaling, integration work is needed in manager.py.
+
+================================================================================
+INTEGRATION GUIDE (estimated ~50-100 lines of code)
+================================================================================
+
+Step 1: Add algorithm selection to PoolConfig (manager.py)
+----------------------------------------------------------
+Add these fields to the PoolConfig dataclass:
+
+    from .adaptive_pool import ScalingAlgorithm, AdaptiveConfig
+
+    @dataclass
+    class PoolConfig:
+        # ... existing fields ...
+
+        # Adaptive scaling (optional, defaults to FIXED behavior)
+        algorithm: ScalingAlgorithm = ScalingAlgorithm.FIXED
+        adaptive_config: AdaptiveConfig | None = None
+
+Step 2: Create PoolSizer in SandboxManager.__init__
+---------------------------------------------------
+In SandboxManager, create a sizer per pool:
+
+    from .adaptive_pool import create_pool_sizer, ScalingMetrics
+
+    class SandboxManager:
+        def __init__(self, ...):
+            # ... existing init ...
+            self._pool_sizers: dict[str, PoolSizer] = {}
+
+            for image, config in pools.items():
+                self._pool_sizers[image] = create_pool_sizer(
+                    algorithm=config.algorithm,
+                    config=config.adaptive_config,
+                    fixed_target=config.target_ready,
+                )
+
+Step 3: Record events on acquire/release
+----------------------------------------
+In acquire() and release/delete methods:
+
+    async def acquire(self, image: str, ...):
+        self._pool_sizers[image].record_event("acquire")
+        # ... existing logic ...
+
+    # When sandbox is released back to pool or deleted:
+    self._pool_sizers[image].record_event("release")
+
+Step 4: Use sizer in scaling loop
+---------------------------------
+In the _replenish_loop or _scaling_loop, replace fixed target_ready:
+
+    async def _scaling_loop(self):
+        while not self._shutdown:
+            for image, pool in self._pools.items():
+                # Build current metrics
+                metrics = ScalingMetrics(
+                    timestamp=time.time(),
+                    arrival_rate=self._calculate_arrival_rate(image),
+                    pool_hit_rate=self._calculate_hit_rate(image),
+                    avg_latency_ms=self._calculate_avg_latency(image),
+                    current_ready=len(pool.ready),
+                    current_in_use=len(pool.in_use),
+                    cold_start_rate=self._calculate_cold_start_rate(image),
+                )
+
+                # Get dynamic target from sizer
+                decision = self._pool_sizers[image].calculate_target(metrics)
+                target = decision.target_ready
+
+                # Use target instead of config.target_ready
+                if len(pool.ready) < target:
+                    # Scale up
+                    ...
+                elif len(pool.ready) > target:
+                    # Scale down (with cooldown)
+                    ...
+
+            await asyncio.sleep(10)  # Check every 10 seconds
+
+Step 5: Track metrics for sizer input
+-------------------------------------
+Add metrics tracking to SandboxManager:
+
+    def _calculate_hit_rate(self, image: str) -> float:
+        '''Ratio of acquires served from pool vs cold starts.'''
+        # Track hits vs misses in acquire()
+        ...
+
+    def _calculate_avg_latency(self, image: str) -> float:
+        '''Average acquire latency in ms.'''
+        # Track timing in acquire()
+        ...
+
+================================================================================
+ALGORITHM SELECTION GUIDE
+================================================================================
+
+- FIXED: Current behavior. Use when demand is predictable and stable.
+- EMA: Good starting point for adaptive scaling. Simple, low overhead.
+- PID: Best for maintaining strict latency/hit-rate SLOs. More responsive.
+- PREDICTIVE: Best when you have historical patterns (daily/weekly cycles).
+- HYBRID: Production recommendation. Combines prediction with reactive buffer.
+- QUEUING: Optimal for known arrival rates. Uses Erlang C formula.
+
+For most use cases, start with EMA, then graduate to HYBRID for production.
+
+================================================================================
 """
 
 import math
@@ -16,91 +134,95 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class ScalingAlgorithm(Enum):
     """Available scaling algorithms."""
-    FIXED = "fixed"                    # Current: fixed target_ready
-    EMA = "ema"                        # Exponential moving average
-    PID = "pid"                        # PID controller
-    PREDICTIVE = "predictive"          # Time-series prediction
-    HYBRID = "hybrid"                  # Prediction + reactive
-    QUEUING = "queuing"                # Queue theory optimal
+
+    FIXED = "fixed"  # Current: fixed target_ready
+    EMA = "ema"  # Exponential moving average
+    PID = "pid"  # PID controller
+    PREDICTIVE = "predictive"  # Time-series prediction
+    HYBRID = "hybrid"  # Prediction + reactive
+    QUEUING = "queuing"  # Queue theory optimal
 
 
 @dataclass
 class ScalingMetrics:
     """Metrics for scaling decisions."""
+
     timestamp: float
-    arrival_rate: float              # Requests per second
-    pool_hit_rate: float             # % served from pool
-    avg_latency_ms: float            # Average acquire latency
-    current_ready: int               # Current pool size
-    current_in_use: int              # Currently acquired
-    cold_start_rate: float           # Cold starts per second
+    arrival_rate: float  # Requests per second
+    pool_hit_rate: float  # % served from pool
+    avg_latency_ms: float  # Average acquire latency
+    current_ready: int  # Current pool size
+    current_in_use: int  # Currently acquired
+    cold_start_rate: float  # Cold starts per second
 
 
 @dataclass
 class ScalingDecision:
     """Result of a scaling calculation."""
+
     target_ready: int
-    confidence: float                # 0-1, how confident in this decision
-    reason: str                      # Human-readable explanation
-    predicted_demand: Optional[float] = None
+    confidence: float  # 0-1, how confident in this decision
+    reason: str  # Human-readable explanation
+    predicted_demand: float | None = None
     algorithm: str = ""
 
 
 class ScaleUpStrategy(Enum):
     """Strategy for scaling up the pool."""
-    IMMEDIATE = "immediate"          # Jump directly to target (risky)
-    LINEAR = "linear"                # Add fixed N per interval
-    PERCENTAGE = "percentage"        # Add X% of current per interval
-    EXPONENTIAL = "exponential"      # Double each interval (fast)
-    AIMD = "aimd"                    # Additive Increase (like TCP)
+
+    IMMEDIATE = "immediate"  # Jump directly to target (risky)
+    LINEAR = "linear"  # Add fixed N per interval
+    PERCENTAGE = "percentage"  # Add X% of current per interval
+    EXPONENTIAL = "exponential"  # Double each interval (fast)
+    AIMD = "aimd"  # Additive Increase (like TCP)
 
 
 @dataclass
 class AdaptiveConfig:
     """Configuration for adaptive scaling."""
+
     # General
-    min_ready: int = 0               # Never go below this
-    max_ready: int = 100             # Never exceed this
-    target_hit_rate: float = 0.9     # Target 90% pool hits
-    target_latency_ms: float = 500   # Target <500ms latency
+    min_ready: int = 0  # Never go below this
+    max_ready: int = 100  # Never exceed this
+    target_hit_rate: float = 0.9  # Target 90% pool hits
+    target_latency_ms: float = 500  # Target <500ms latency
 
     # Scale-up parameters
     scale_up_strategy: ScaleUpStrategy = ScaleUpStrategy.PERCENTAGE
-    scale_up_step: int = 10          # For LINEAR: add this many per step
-    scale_up_percent: float = 0.5    # For PERCENTAGE: add 50% of current
-    scale_up_interval: float = 30    # Seconds between scale-up steps
-    scale_up_max_step: int = 50      # Maximum sandboxes to add in one step
+    scale_up_step: int = 10  # For LINEAR: add this many per step
+    scale_up_percent: float = 0.5  # For PERCENTAGE: add 50% of current
+    scale_up_interval: float = 30  # Seconds between scale-up steps
+    scale_up_max_step: int = 50  # Maximum sandboxes to add in one step
 
     # Scale-down parameters (always slow)
     scale_down_percent: float = 0.2  # Remove at most 20% per step
-    scale_down_cooldown: float = 300 # 5 min after last scale-up
+    scale_down_cooldown: float = 300  # 5 min after last scale-up
 
     # EMA parameters
-    ema_alpha: float = 0.3           # Smoothing factor (0.1=slow, 0.5=fast)
-    ema_buffer_seconds: float = 60   # Buffer for anticipated demand
+    ema_alpha: float = 0.3  # Smoothing factor (0.1=slow, 0.5=fast)
+    ema_buffer_seconds: float = 60  # Buffer for anticipated demand
 
     # PID parameters
-    pid_kp: float = 0.5              # Proportional gain
-    pid_ki: float = 0.1              # Integral gain
-    pid_kd: float = 0.05             # Derivative gain
-    pid_interval: float = 10         # Control interval seconds
+    pid_kp: float = 0.5  # Proportional gain
+    pid_ki: float = 0.1  # Integral gain
+    pid_kd: float = 0.05  # Derivative gain
+    pid_interval: float = 10  # Control interval seconds
 
     # Predictive parameters
-    history_window: int = 3600       # 1 hour of history
-    prediction_horizon: int = 300    # Predict 5 min ahead
+    history_window: int = 3600  # 1 hour of history
+    prediction_horizon: int = 300  # Predict 5 min ahead
     seasonality_hours: list = field(default_factory=lambda: [1, 24])
 
     # Hybrid parameters
     base_capacity_ratio: float = 0.3  # 30% from prediction
-    burst_capacity_ratio: float = 0.7 # 70% reactive buffer
+    burst_capacity_ratio: float = 0.7  # 70% reactive buffer
 
     # Queuing theory
-    creation_time_avg: float = 60    # Average sandbox creation time
+    creation_time_avg: float = 60  # Average sandbox creation time
     target_wait_percentile: float = 0.95
 
 
@@ -129,7 +251,7 @@ class FixedPoolSizer(PoolSizer):
             target_ready=self.target,
             confidence=1.0,
             reason=f"Fixed target: {self.target}",
-            algorithm="fixed"
+            algorithm="fixed",
         )
 
     def record_event(self, event_type: str, timestamp: float = None):
@@ -164,7 +286,6 @@ class EMAPoolSizer(PoolSizer):
 
     def calculate_target(self, metrics: ScalingMetrics) -> ScalingDecision:
         now = time.time()
-        dt = now - self.last_update
         self.last_update = now
 
         # Calculate current arrival rate
@@ -184,7 +305,7 @@ class EMAPoolSizer(PoolSizer):
             confidence=0.7,  # EMA is moderately confident
             reason=f"EMA rate={self.arrival_rate_ema:.3f}/s, anticipated={anticipated_demand:.1f}",
             predicted_demand=anticipated_demand,
-            algorithm="ema"
+            algorithm="ema",
         )
 
 
@@ -227,11 +348,7 @@ class PIDPoolSizer(PoolSizer):
         derivative = (error - self.last_error) / dt if dt > 0 else 0
         self.last_error = error
 
-        adjustment = (
-            self.config.pid_kp * error +
-            self.config.pid_ki * self.integral +
-            self.config.pid_kd * derivative
-        )
+        adjustment = self.config.pid_kp * error + self.config.pid_ki * self.integral + self.config.pid_kd * derivative
 
         # Scale adjustment to pool size units
         # Positive error = need more capacity
@@ -243,9 +360,9 @@ class PIDPoolSizer(PoolSizer):
         return ScalingDecision(
             target_ready=new_target,
             confidence=0.8,
-            reason=f"PID error={error:.3f}, P={self.config.pid_kp*error:.2f}, "
-                   f"I={self.config.pid_ki*self.integral:.2f}, D={self.config.pid_kd*derivative:.2f}",
-            algorithm="pid"
+            reason=f"PID error={error:.3f}, P={self.config.pid_kp * error:.2f}, "
+            f"I={self.config.pid_ki * self.integral:.2f}, D={self.config.pid_kd * derivative:.2f}",
+            algorithm="pid",
         )
 
 
@@ -285,7 +402,7 @@ class PredictivePoolSizer(PoolSizer):
             return 0.0
 
         # Events per hour averaged over days
-        days_with_data = len(set(time.localtime(e).tm_mday for e in recent))
+        days_with_data = len({time.localtime(e).tm_mday for e in recent})
         return len(recent) / max(1, days_with_data) / 3600  # per second
 
     def _predict_demand(self, horizon_seconds: int) -> float:
@@ -327,9 +444,9 @@ class PredictivePoolSizer(PoolSizer):
             target_ready=target,
             confidence=confidence,
             reason=f"Predicted {predicted:.1f} requests in next {self.config.prediction_horizon}s, "
-                   f"safety={safety_factor:.2f}x",
+            f"safety={safety_factor:.2f}x",
             predicted_demand=predicted,
-            algorithm="predictive"
+            algorithm="predictive",
         )
 
 
@@ -365,10 +482,10 @@ class QueuingTheoryPoolSizer(PoolSizer):
 
         # Calculate (c*rho)^c / c!
         a = c * rho
-        numerator = (a ** c) / math.factorial(c)
+        numerator = (a**c) / math.factorial(c)
 
         # Calculate sum
-        sum_terms = sum((a ** k) / math.factorial(k) for k in range(c))
+        sum_terms = sum((a**k) / math.factorial(k) for k in range(c))
 
         denominator = sum_terms + numerator / (1 - rho)
 
@@ -387,7 +504,7 @@ class QueuingTheoryPoolSizer(PoolSizer):
                 target_ready=self.config.min_ready,
                 confidence=0.5,
                 reason="No recent arrivals",
-                algorithm="queuing"
+                algorithm="queuing",
             )
 
         # Find minimum c where wait probability < threshold
@@ -404,15 +521,15 @@ class QueuingTheoryPoolSizer(PoolSizer):
                     target_ready=c,
                     confidence=0.85,
                     reason=f"M/M/c optimal: λ={lambda_rate:.4f}, μ={mu:.4f}, "
-                           f"P(wait)={prob_wait:.3f} <= {target_prob:.3f}",
-                    algorithm="queuing"
+                    f"P(wait)={prob_wait:.3f} <= {target_prob:.3f}",
+                    algorithm="queuing",
                 )
 
         return ScalingDecision(
             target_ready=self.config.max_ready,
             confidence=0.6,
             reason=f"Demand exceeds capacity: λ={lambda_rate:.4f}",
-            algorithm="queuing"
+            algorithm="queuing",
         )
 
 
@@ -488,20 +605,14 @@ class HybridAdaptivePoolSizer(PoolSizer):
         pred_weight = pred_decision.confidence * self.config.base_capacity_ratio
         ema_weight = 1 - pred_weight
 
-        base_target = int(
-            pred_decision.target_ready * pred_weight +
-            ema_decision.target_ready * ema_weight
-        )
+        base_target = int(pred_decision.target_ready * pred_weight + ema_decision.target_ready * ema_weight)
 
         # Add burst buffer based on recent variance
         recent_max = max(metrics.current_ready + metrics.current_in_use, base_target)
         burst_buffer = int((recent_max - base_target) * self.config.burst_capacity_ratio)
 
         self.desired_target = base_target + burst_buffer
-        self.desired_target = max(
-            self.config.min_ready,
-            min(self.config.max_ready, self.desired_target)
-        )
+        self.desired_target = max(self.config.min_ready, min(self.config.max_ready, self.desired_target))
 
         reason_parts = [f"pred={pred_decision.target_ready}", f"ema={ema_decision.target_ready}"]
 
@@ -535,24 +646,19 @@ class HybridAdaptivePoolSizer(PoolSizer):
                 cooldown_remaining = self.config.scale_down_cooldown - time_since_scale_up
                 reason_parts.append(f"scale_down cooldown ({cooldown_remaining:.0f}s)")
 
-        self.current_target = max(
-            self.config.min_ready,
-            min(self.config.max_ready, self.current_target)
-        )
+        self.current_target = max(self.config.min_ready, min(self.config.max_ready, self.current_target))
 
         return ScalingDecision(
             target_ready=self.current_target,
             confidence=(pred_decision.confidence + 0.7) / 2,
             reason=f"Hybrid[desired={self.desired_target}]: " + ", ".join(reason_parts),
             predicted_demand=pred_decision.predicted_demand,
-            algorithm="hybrid"
+            algorithm="hybrid",
         )
 
 
 def create_pool_sizer(
-    algorithm: ScalingAlgorithm,
-    config: Optional[AdaptiveConfig] = None,
-    fixed_target: int = 10
+    algorithm: ScalingAlgorithm, config: AdaptiveConfig | None = None, fixed_target: int = 10
 ) -> PoolSizer:
     """Factory function to create a pool sizer."""
     config = config or AdaptiveConfig()
@@ -578,7 +684,7 @@ def simulate_workload(
     sizer: PoolSizer,
     duration_seconds: int = 3600,
     base_rate: float = 0.1,
-    burst_times: list[tuple[int, float, int]] = None  # (start, rate, duration)
+    burst_times: list[tuple[int, float, int]] = None,  # (start, rate, duration)
 ) -> list[ScalingDecision]:
     """Simulate a workload and collect scaling decisions.
 
@@ -603,7 +709,7 @@ def simulate_workload(
         avg_latency_ms=100,
         current_ready=10,
         current_in_use=0,
-        cold_start_rate=0
+        cold_start_rate=0,
     )
 
     while current_time < duration_seconds:
