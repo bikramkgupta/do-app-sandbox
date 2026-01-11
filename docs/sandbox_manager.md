@@ -49,6 +49,7 @@ async with SandboxManager(pools={"python": PoolConfig(target_ready=3)}) as manag
 |-----------|---------|-------------|
 | `max_ready` | 10 | Maximum sandboxes to keep warming in pool |
 | `target_ready` | 0 | Target number of ready sandboxes when active |
+| `min_ready` | 0 | **Minimum sandboxes to maintain even when idle** (prevents oscillation) |
 | `idle_timeout` | 60 | Seconds of no acquires before scaling down |
 | `scale_down_delay` | 60 | Seconds between destructions during scale-down |
 | `cooldown_after_acquire` | 120 | Seconds to pause scale-down after an acquire |
@@ -57,6 +58,12 @@ async with SandboxManager(pools={"python": PoolConfig(target_ready=3)}) as manag
 | `on_empty` | `"create"` | Behavior when empty: `"create"` (fallback) or `"fail"` (fast-fail) |
 | `create_retries` | 3 | Retry attempts for failed sandbox creation |
 | `create_retry_delay` | 5 | Seconds between creation retries |
+
+**Important:** `min_ready` vs `target_ready`:
+- `target_ready`: Pool size maintained only during active usage periods
+- `min_ready`: Guaranteed baseline maintained at all times, even when idle
+
+If you need a persistent pool that never scales to zero, set `min_ready` to your desired baseline.
 
 ### SandboxManager Parameters
 
@@ -73,15 +80,26 @@ async with SandboxManager(pools={"python": PoolConfig(target_ready=3)}) as manag
 Pools automatically scale based on demand:
 
 ```
-IDLE (0 warm) ←──── idle_timeout ──── ACTIVE (target_ready warm)
-      │                                        ↑
-      └──── acquire() triggers scale-up ───────┘
+IDLE (min_ready) ←── idle_timeout ──→ ACTIVE (target_ready)
+       │                                        ↑
+       └──── acquire() triggers scale-up ───────┘
 ```
 
 **Scale-down behavior:**
-1. No acquires for `idle_timeout` seconds → start scaling down
+1. No acquires for `cooldown_after_acquire` seconds → start scaling down
 2. Destroy 1 sandbox every `scale_down_delay` seconds
-3. After any acquire, pause scale-down for `cooldown_after_acquire` seconds
+3. **Stop at `min_ready`** - never scale below this baseline
+4. After any acquire, pause scale-down for `cooldown_after_acquire` seconds
+
+**Preventing oscillation:** If you see pools repeatedly creating and deleting sandboxes,
+set `min_ready` to maintain a persistent baseline. For example:
+
+```python
+PoolConfig(
+    target_ready=5,  # Scale up to 5 during activity
+    min_ready=2,     # Never drop below 2, even when idle
+)
+```
 
 This prevents paying for idle sandboxes while avoiding thrashing.
 

@@ -148,14 +148,17 @@ Each pool transitions between states based on activity:
               ▼                            │
          ┌─────────┐    idle_timeout   ┌───┴─────┐
          │  IDLE   │ ◄──────────────── │  ACTIVE │
-         │(scaled  │                   │ (target │
-         │ down)   │                   │  ready) │
+         │(min_    │                   │ (target │
+         │ ready)  │                   │  ready) │
          └─────────┘                   └─────────┘
               │                             ▲
               │     acquire() triggers      │
               │     scale-up                │
               └─────────────────────────────┘
 ```
+
+**Key:** When idle, pool maintains `min_ready` sandboxes (not 0). This prevents
+the create/delete oscillation pattern that occurs when pools scale to zero.
 
 ---
 
@@ -322,6 +325,7 @@ async def main():
 |-----------|------|---------|-------------|
 | `max_ready` | int | 10 | Maximum sandboxes to keep warming in pool |
 | `target_ready` | int | 0 | Target number of ready sandboxes when pool is active |
+| `min_ready` | int | 0 | **Minimum sandboxes to maintain even when idle** (prevents oscillation) |
 | `idle_timeout` | int | 60 | Seconds of no acquires before scaling down |
 | `scale_down_delay` | int | 60 | Seconds between sandbox destructions during scale-down |
 | `cooldown_after_acquire` | int | 120 | Seconds to pause scale-down after an acquire |
@@ -330,6 +334,12 @@ async def main():
 | `on_empty` | str | "create" | Behavior when pool is empty: "create" or "fail" |
 | `create_retries` | int | 3 | Number of retries for failed sandbox creation |
 | `create_retry_delay` | int | 5 | Seconds between creation retries |
+
+**Important:** `min_ready` vs `target_ready`:
+- `target_ready`: Pool size maintained only during active usage periods
+- `min_ready`: Guaranteed baseline maintained at all times, even when idle
+
+This prevents the create/delete oscillation pattern where pools scale to zero during idle periods.
 
 ### 5.2 SandboxManager Parameters
 
