@@ -69,39 +69,6 @@ class TestPoolConfig:
         with pytest.raises(ValueError, match="target_ready.*cannot exceed max_ready"):
             PoolConfig(max_ready=5, target_ready=10)
 
-    def test_min_ready_default(self):
-        """Test that min_ready defaults to 0."""
-        config = PoolConfig()
-        assert config.min_ready == 0
-
-    def test_min_ready_custom(self):
-        """Test setting custom min_ready value."""
-        config = PoolConfig(min_ready=3, target_ready=5)
-        assert config.min_ready == 3
-
-    def test_invalid_min_ready_negative(self):
-        """Test that negative min_ready raises ValueError."""
-        with pytest.raises(ValueError, match="min_ready must be >= 0"):
-            PoolConfig(min_ready=-1)
-
-    def test_min_ready_exceeds_target(self):
-        """Test that min_ready > target_ready raises ValueError when target_ready > 0."""
-        with pytest.raises(ValueError, match="min_ready.*cannot exceed target_ready"):
-            PoolConfig(min_ready=10, target_ready=5)
-
-    def test_min_ready_exceeds_max(self):
-        """Test that min_ready > max_ready raises ValueError."""
-        with pytest.raises(ValueError, match="min_ready.*cannot exceed max_ready"):
-            PoolConfig(min_ready=15, max_ready=10)
-
-    def test_min_ready_with_zero_target(self):
-        """Test that min_ready can be set when target_ready is 0."""
-        # This is valid: min_ready=5 with target_ready=0 means
-        # "maintain 5 sandboxes always, but don't scale up on activity"
-        config = PoolConfig(min_ready=5, target_ready=0, max_ready=10)
-        assert config.min_ready == 5
-        assert config.target_ready == 0
-
 
 class TestPoolMetrics:
     """Tests for PoolMetrics dataclass."""
@@ -249,9 +216,9 @@ class TestSandboxPool:
         assert pool._shutdown is True
 
     @pytest.mark.asyncio
-    async def test_should_scale_down_respects_min_ready(self):
-        """Test that _should_scale_down respects min_ready threshold."""
-        config = PoolConfig(target_ready=5, min_ready=2, max_ready=10)
+    async def test_should_scale_down_respects_target_ready(self):
+        """Test that _should_scale_down respects target_ready threshold."""
+        config = PoolConfig(target_ready=2, max_ready=10)
         semaphore = asyncio.Semaphore(10)
         pool = SandboxPool(
             image="test-image",
@@ -260,7 +227,7 @@ class TestSandboxPool:
             create_semaphore=semaphore,
         )
 
-        # Add 2 sandboxes (at min_ready)
+        # Add 2 sandboxes (at target_ready)
         for _ in range(2):
             mock = MagicMock()
             mock.delete = MagicMock()
@@ -268,15 +235,14 @@ class TestSandboxPool:
 
         assert pool.ready_count == 2
 
-        # Should NOT scale down when at min_ready
-        pool._is_active = False  # Simulate inactive state
+        # Should NOT scale down when at target_ready
         should_scale = await pool._should_scale_down()
         assert should_scale is False
 
     @pytest.mark.asyncio
-    async def test_should_scale_down_when_above_min_ready(self):
-        """Test that _should_scale_down allows scaling when above min_ready."""
-        config = PoolConfig(target_ready=5, min_ready=2, max_ready=10)
+    async def test_scale_down_one_stops_at_target_ready(self):
+        """Test that _scale_down_one stops when reaching target_ready."""
+        config = PoolConfig(target_ready=2, max_ready=10)
         semaphore = asyncio.Semaphore(10)
         pool = SandboxPool(
             image="test-image",
@@ -285,32 +251,7 @@ class TestSandboxPool:
             create_semaphore=semaphore,
         )
 
-        # Add 4 sandboxes (above min_ready=2)
-        for _ in range(4):
-            mock = MagicMock()
-            mock.delete = MagicMock()
-            await pool._ready_queue.put(_PooledSandbox(sandbox=mock))
-
-        assert pool.ready_count == 4
-
-        # Should scale down when inactive and above min_ready
-        pool._is_active = False
-        should_scale = await pool._should_scale_down()
-        assert should_scale is True
-
-    @pytest.mark.asyncio
-    async def test_scale_down_one_stops_at_min_ready(self):
-        """Test that _scale_down_one stops when reaching min_ready."""
-        config = PoolConfig(target_ready=5, min_ready=2, max_ready=10)
-        semaphore = asyncio.Semaphore(10)
-        pool = SandboxPool(
-            image="test-image",
-            config=config,
-            sandbox_defaults={},
-            create_semaphore=semaphore,
-        )
-
-        # Add exactly 2 sandboxes (at min_ready)
+        # Add exactly 2 sandboxes (at target_ready)
         for _ in range(2):
             mock = MagicMock()
             mock.delete = MagicMock()
@@ -320,7 +261,7 @@ class TestSandboxPool:
 
         # scale_down_one should not remove any sandbox
         await pool._scale_down_one()
-        assert pool.ready_count == 2  # Still at min_ready
+        assert pool.ready_count == 2  # Still at target_ready
 
 
 class TestSandboxManager:
