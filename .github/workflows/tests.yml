@@ -1,0 +1,62 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suite to run'
+        required: true
+        default: 'unit'
+        type: choice
+        options:
+          - unit
+          - integration
+          - api
+          - functional
+          - ci-quick
+          - ci-full
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    # Always run on push/PR, only run on dispatch if unit selected
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'unit'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --dev
+      - run: cd tests && make test-unit
+
+  cloud-tests:
+    name: Cloud Tests (${{ github.event.inputs.test_suite }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_suite != 'unit'
+    env:
+      DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      SPACES_BUCKET: ${{ secrets.SPACES_BUCKET }}
+      SPACES_REGION: ${{ secrets.SPACES_REGION }}
+      SPACES_ACCESS_KEY: ${{ secrets.SPACES_ACCESS_KEY }}
+      SPACES_SECRET_KEY: ${{ secrets.SPACES_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --dev
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      - name: Run test suite
+        run: |
+          cd tests
+          case "${{ github.event.inputs.test_suite }}" in
+            integration) make ci-integration ;;
+            api)         make ci-api ;;
+            functional)  make test-setup && make test-functional ; make test-teardown ;;
+            ci-quick)    make ci-quick ;;
+            ci-full)     make ci-test ;;
+          esac
