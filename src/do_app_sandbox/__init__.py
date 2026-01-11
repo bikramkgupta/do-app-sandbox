@@ -40,46 +40,78 @@ Example usage:
 __version__ = "0.1.0"
 
 # Main classes
-from .sandbox import Sandbox
 from .async_sandbox import AsyncSandbox
-from .manager import SandboxManager, PoolConfig, PoolMetrics
-
-# Environment variable constants
-from .sandbox import ENV_REGISTRY, ENV_REGION
-from .deployer import DEFAULT_REGION, DEFAULT_INSTANCE_SIZE
-
-# Types
-from .types import (
-    CommandResult,
-    ProcessInfo,
-    FileInfo,
-    AppInfo,
-    SpacesConfig,
-    ImageInfo,
-    ValidationResult,
-)
+from .deployer import DEFAULT_INSTANCE_SIZE, DEFAULT_REGION
 
 # Exceptions
 from .exceptions import (
-    SandboxError,
-    SandboxCreationError,
-    SandboxNotFoundError,
-    SandboxNotReadyError,
     CommandExecutionError,
     CommandTimeoutError,
-    FileOperationError,
     ConnectionError,
-    SpacesNotConfiguredError,
+    FileOperationError,
+    # Hibernation exceptions
+    HibernationError,
     ImageNotValidatedError,
     ImageValidationError,
     PoolError,
     PoolExhaustedError,
     PoolShutdownError,
+    SandboxCreationError,
+    SandboxError,
+    SandboxHibernatedError,
+    SandboxNotFoundError,
+    SandboxNotReadyError,
+    ServiceConnectionError,
+    # Service mode exceptions
+    ServiceModeError,
+    ServiceNotAvailableError,
+    # Snapshot exceptions
+    SnapshotError,
+    SnapshotNotFoundError,
+    SnapshotRestoreError,
+    SnapshotUploadError,
+    SpacesNotConfiguredError,
     WarmUpTimeoutError,
 )
 
 # Image registry
 from .image_registry import ImageRegistry
+from .manager import PoolConfig, PoolMetrics, SandboxManager
+
+# Environment variable constants
+from .sandbox import ENV_REGION, ENV_REGISTRY, Sandbox
+
+# Service mode HTTP clients
+from .service_client import AsyncSandboxServiceClient, SandboxServiceClient
+
+# Snapshot management
+from .snapshot import SnapshotManager
+
+# Types
+from .types import (
+    AppInfo,
+    # Existing types
+    CommandResult,
+    # Port exposure
+    ExposedPort,
+    FileInfo,
+    # Git
+    GitCredentials,
+    HibernatedSandbox,
+    ImageInfo,
+    ProcessInfo,
+    # Enums
+    SandboxMode,
+    SandboxState,
+    # Configuration
+    ServiceConfig,
+    # Snapshots
+    SnapshotMetadata,
+    SpacesConfig,
+    # Streaming
+    StreamEvent,
+    ValidationResult,
+)
 
 __all__ = [
     # Main classes
@@ -91,12 +123,31 @@ __all__ = [
     "PoolMetrics",
     # Image management
     "ImageRegistry",
+    # Snapshot management
+    "SnapshotManager",
+    # Service mode HTTP clients
+    "SandboxServiceClient",
+    "AsyncSandboxServiceClient",
     # Configuration constants
     "ENV_REGISTRY",
     "ENV_REGION",
     "DEFAULT_REGION",
     "DEFAULT_INSTANCE_SIZE",
-    # Types
+    # Types - Enums
+    "SandboxMode",
+    "SandboxState",
+    # Types - Configuration
+    "ServiceConfig",
+    # Types - Streaming
+    "StreamEvent",
+    # Types - Snapshots
+    "SnapshotMetadata",
+    "HibernatedSandbox",
+    # Types - Git
+    "GitCredentials",
+    # Types - Port exposure
+    "ExposedPort",
+    # Types - Existing
     "CommandResult",
     "ProcessInfo",
     "FileInfo",
@@ -120,4 +171,16 @@ __all__ = [
     "PoolExhaustedError",
     "PoolShutdownError",
     "WarmUpTimeoutError",
+    # Snapshot exceptions
+    "SnapshotError",
+    "SnapshotNotFoundError",
+    "SnapshotUploadError",
+    "SnapshotRestoreError",
+    # Service mode exceptions
+    "ServiceModeError",
+    "ServiceNotAvailableError",
+    "ServiceConnectionError",
+    # Hibernation exceptions
+    "HibernationError",
+    "SandboxHibernatedError",
 ]

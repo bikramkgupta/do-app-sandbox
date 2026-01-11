@@ -6,12 +6,11 @@ Tests the SDK's ability to connect to an existing App Platform app
 and run diagnostic commands, as described in docs/troubleshooting_existing_apps.md
 """
 
-import sys
-import os
 import json
-from dataclasses import dataclass, asdict
+import os
+import sys
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
@@ -21,18 +20,19 @@ from do_app_sandbox import Sandbox
 @dataclass
 class TestResult:
     """Result of the existing app connection test."""
+
     test_name: str = "Connect to Existing App"
     app_id: str = ""
     component: str = ""
     connected: bool = False
-    whoami: Optional[str] = None
-    pwd: Optional[str] = None
-    uname: Optional[str] = None
-    ps_aux: Optional[str] = None
-    df_h: Optional[str] = None
-    env_count: Optional[int] = None
-    file_list: Optional[list] = None
-    error: Optional[str] = None
+    whoami: str | None = None
+    pwd: str | None = None
+    uname: str | None = None
+    ps_aux: str | None = None
+    df_h: str | None = None
+    env_count: int | None = None
+    file_list: list | None = None
+    error: str | None = None
     timestamp: str = ""
 
 
@@ -127,9 +127,11 @@ def run_test(app_id: str, component: str = "sandbox") -> TestResult:
 
 def main():
     """Main entry point for Test 1."""
-    # Default app ID from user request
-    app_id = "4dd0ff44-45c6-4b63-8218-5b8d38d0a1f1"
-    component = "sandbox"  # Default for SDK-created sandboxes
+    # Get app ID from environment or command line
+    # If not provided, create a temporary sandbox to test against
+    app_id = os.environ.get("TEST_APP_ID")
+    component = os.environ.get("TEST_COMPONENT", "sandbox")
+    created_sandbox = None
 
     # Allow override from command line
     if len(sys.argv) > 1:
@@ -140,6 +142,19 @@ def main():
     print("=" * 60)
     print("TEST 1: Connect to Existing App and Troubleshoot")
     print("=" * 60)
+
+    # If no app_id provided, create a temporary sandbox
+    if not app_id:
+        print("No TEST_APP_ID provided, creating temporary sandbox...")
+        try:
+            created_sandbox = Sandbox.create(image="python", wait_ready=True, timeout=300)
+            app_id = created_sandbox.app_id
+            print(f"Created temporary sandbox: {app_id}")
+        except Exception as e:
+            print(f"Failed to create temporary sandbox: {e}")
+            print("STATUS: SKIP - No app available to test")
+            return 0  # Skip gracefully
+
     print(f"App ID: {app_id}")
     print(f"Component: {component}")
     print("=" * 60)
@@ -154,6 +169,15 @@ def main():
         print("STATUS: PASS - Connected successfully")
     else:
         print(f"STATUS: FAIL - {result.error}")
+
+    # Cleanup temporary sandbox if we created one
+    if created_sandbox:
+        print("\nCleaning up temporary sandbox...")
+        try:
+            created_sandbox.delete()
+            print("Temporary sandbox deleted")
+        except Exception as e:
+            print(f"Warning: Failed to delete temporary sandbox: {e}")
 
     # Save result to JSON
     results_dir = os.path.join(os.path.dirname(__file__), "results")

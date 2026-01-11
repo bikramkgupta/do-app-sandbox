@@ -8,20 +8,19 @@ Usage:
     python tests/functional/run_all.py --only 3 4  # Run only tests 3 and 4
 """
 
+import argparse
+import json
+import os
 import subprocess
 import sys
-import os
-import json
-import argparse
 from datetime import datetime, timezone
-from pathlib import Path
 
 
 def run_test(test_num: int, test_file: str) -> dict:
     """Run a single test and return results."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"RUNNING TEST {test_num}: {test_file}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     result = {
         "test_num": test_num,

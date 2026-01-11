@@ -7,18 +7,17 @@ Based on tests/benchmarks/sandbox_create_benchmark.py
 """
 
 import asyncio
+import json
 import os
 import sys
 import time
-import json
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Optional
-from pathlib import Path
 
 # Load .env file if dotenv available
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass  # dotenv not required
@@ -32,20 +31,22 @@ from do_app_sandbox.spaces import SpacesConfig
 @dataclass
 class BenchmarkResult:
     """Result of a single sandbox creation benchmark."""
+
     index: int
     image: str
-    app_id: Optional[str] = None
+    app_id: str | None = None
     create_time_s: float = 0.0
     exec_time_s: float = 0.0
     delete_time_s: float = 0.0
     total_time_s: float = 0.0
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class BenchmarkSummary:
     """Summary of all benchmark results."""
+
     test_name: str = "Sandbox Creation Benchmark"
     num_sandboxes: int = 0
     successful: int = 0
@@ -60,7 +61,7 @@ class BenchmarkSummary:
     results: list = None
 
 
-def get_spaces_config() -> Optional[SpacesConfig]:
+def get_spaces_config() -> SpacesConfig | None:
     """Get Spaces config from environment if available."""
     endpoint = os.getenv("SPACES_ENDPOINT")
     access_key = os.getenv("SPACES_ACCESS_KEY")
@@ -83,10 +84,7 @@ def get_spaces_config() -> Optional[SpacesConfig]:
 
 
 async def create_and_test_sandbox(
-    index: int,
-    image: str,
-    semaphore: asyncio.Semaphore,
-    spaces_config: Optional[SpacesConfig] = None
+    index: int, image: str, semaphore: asyncio.Semaphore, spaces_config: SpacesConfig | None = None
 ) -> BenchmarkResult:
     """Create a sandbox, run a command, delete it."""
     result = BenchmarkResult(index=index, image=image)
@@ -148,7 +146,7 @@ async def run_benchmark(num_sandboxes: int = 5, max_concurrent: int = 3) -> Benc
     print("=" * 60)
     print(f"Creating {num_sandboxes} sandboxes")
     print(f"Max concurrent: {max_concurrent}")
-    print(f"Region: syd1")
+    print("Region: syd1")
     print(f"Spaces enabled: {summary.spaces_enabled}")
     print("=" * 60)
 
@@ -206,7 +204,7 @@ def main():
     print(f"Overall time: {summary.overall_time_s:.1f}s")
 
     if summary.successful > 0:
-        print(f"\nCreate times:")
+        print("\nCreate times:")
         print(f"  Min: {summary.min_create_s:.1f}s")
         print(f"  Max: {summary.max_create_s:.1f}s")
         print(f"  Avg: {summary.avg_create_s:.1f}s")

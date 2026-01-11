@@ -22,18 +22,19 @@ Example usage:
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
-from .async_sandbox import AsyncSandbox
 from .exceptions import (
     PoolExhaustedError,
     PoolShutdownError,
     SandboxCreationError,
+    SpacesNotConfiguredError,
     WarmUpTimeoutError,
 )
 from .sandbox import Sandbox
-from .types import SpacesConfig
+from .types import HibernatedSandbox, SpacesConfig
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +84,7 @@ class PoolConfig:
         if self.target_ready < 0:
             raise ValueError(f"target_ready must be >= 0, got {self.target_ready}")
         if self.target_ready > self.max_ready:
-            raise ValueError(
-                f"target_ready ({self.target_ready}) cannot exceed max_ready ({self.max_ready})"
-            )
+            raise ValueError(f"target_ready ({self.target_ready}) cannot exceed max_ready ({self.max_ready})")
 
 
 @dataclass
@@ -145,9 +144,9 @@ class SandboxPool:
         self,
         image: str,
         config: PoolConfig,
-        sandbox_defaults: Dict[str, Any],
+        sandbox_defaults: dict[str, Any],
         create_semaphore: asyncio.Semaphore,
-        total_limit_callback: Optional[Callable[[], bool]] = None,
+        total_limit_callback: Callable[[], bool] | None = None,
     ):
         """Initialize a sandbox pool.
 
@@ -171,18 +170,18 @@ class SandboxPool:
         self._lock = asyncio.Lock()
 
         # Tracking
-        self._last_acquire_time: Optional[float] = None
-        self._last_scale_down_time: Optional[float] = None
+        self._last_acquire_time: float | None = None
+        self._last_scale_down_time: float | None = None
         self._is_active: bool = False
         self._shutdown: bool = False
 
         # Metrics
         self._metrics = PoolMetrics()
-        self._acquire_latencies: List[float] = []
+        self._acquire_latencies: list[float] = []
 
         # Background tasks
-        self._replenish_task: Optional[asyncio.Task] = None
-        self._health_task: Optional[asyncio.Task] = None
+        self._replenish_task: asyncio.Task | None = None
+        self._health_task: asyncio.Task | None = None
         self._creation_tasks: set[asyncio.Task] = set()  # Track in-flight creation tasks
 
     @property
@@ -206,13 +205,9 @@ class SandboxPool:
         self._metrics.creating = self._creating_count
         self._metrics.in_use = self._in_use_count
         if self._metrics.total_acquires > 0:
-            self._metrics.pool_hit_rate = (
-                self._metrics.acquires_from_pool / self._metrics.total_acquires
-            )
+            self._metrics.pool_hit_rate = self._metrics.acquires_from_pool / self._metrics.total_acquires
         if self._acquire_latencies:
-            self._metrics.avg_acquire_latency_ms = (
-                sum(self._acquire_latencies) / len(self._acquire_latencies)
-            )
+            self._metrics.avg_acquire_latency_ms = sum(self._acquire_latencies) / len(self._acquire_latencies)
         return self._metrics
 
     async def start(self) -> None:
@@ -242,13 +237,12 @@ class SandboxPool:
             except asyncio.CancelledError:
                 pass
 
-        # Cancel in-flight creation tasks and wait for them to complete
-        # This ensures we don't wait indefinitely for long-running sandbox creations
+        # Wait for in-flight creation tasks to complete (don't cancel them!)
+        # Cancelling would interrupt the await but the thread continues creating
+        # sandboxes that would then be orphaned. By waiting, the tasks complete
+        # and see _shutdown=True, destroying any just-created sandboxes.
         if self._creation_tasks:
-            logger.debug(f"Cancelling {len(self._creation_tasks)} in-flight creation tasks")
-            for task in self._creation_tasks:
-                task.cancel()
-            # Wait for cancellation to complete - return_exceptions captures CancelledError
+            logger.debug(f"Waiting for {len(self._creation_tasks)} in-flight creation tasks to complete")
             await asyncio.gather(*self._creation_tasks, return_exceptions=True)
 
         # Destroy all pooled sandboxes (any that slipped through before shutdown flag was set)
@@ -263,7 +257,7 @@ class SandboxPool:
             except asyncio.QueueEmpty:
                 break
 
-    async def acquire(self, timeout: Optional[float] = None) -> Sandbox:
+    async def acquire(self, timeout: float | None = None) -> Sandbox:
         """Acquire a sandbox from the pool.
 
         Args:
@@ -301,9 +295,7 @@ class SandboxPool:
             self._creating_count += 1
             if self._total_limit_callback and self._total_limit_callback():
                 self._creating_count -= 1
-                raise PoolExhaustedError(
-                    f"Global sandbox limit reached, cannot create on-demand for {self.image}"
-                )
+                raise PoolExhaustedError(f"Global sandbox limit reached, cannot create on-demand for {self.image}")
 
         # Fall back to cold start
         logger.info(f"Pool empty for {self.image}, creating sandbox on-demand")
@@ -335,7 +327,7 @@ class SandboxPool:
         if self._in_use_count > 0:
             self._in_use_count -= 1
 
-    async def _try_acquire_from_pool(self) -> Optional[Sandbox]:
+    async def _try_acquire_from_pool(self) -> Sandbox | None:
         """Try to get a sandbox from the pool without blocking."""
         async with self._lock:
             self._last_acquire_time = time.time()
@@ -377,11 +369,9 @@ class SandboxPool:
         if len(self._acquire_latencies) > 1000:
             self._acquire_latencies = self._acquire_latencies[-1000:]
 
-    async def _create_sandbox_with_retry(
-        self, timeout: Optional[float] = None
-    ) -> Sandbox:
+    async def _create_sandbox_with_retry(self, timeout: float | None = None) -> Sandbox:
         """Create a sandbox with retry logic."""
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(self.config.create_retries):
             try:
@@ -404,20 +394,16 @@ class SandboxPool:
                 last_error = e
                 self._metrics.failed_creates += 1
                 logger.warning(
-                    f"Sandbox creation attempt {attempt + 1}/{self.config.create_retries} "
-                    f"failed for {self.image}: {e}"
+                    f"Sandbox creation attempt {attempt + 1}/{self.config.create_retries} failed for {self.image}: {e}"
                 )
                 if attempt < self.config.create_retries - 1:
                     await asyncio.sleep(self.config.create_retry_delay)
 
         raise SandboxCreationError(
-            f"Failed to create sandbox for {self.image} after "
-            f"{self.config.create_retries} attempts: {last_error}"
+            f"Failed to create sandbox for {self.image} after {self.config.create_retries} attempts: {last_error}"
         )
 
-    async def _create_sandbox_no_counter(
-        self, timeout: Optional[float] = None
-    ) -> Sandbox:
+    async def _create_sandbox_no_counter(self, timeout: float | None = None) -> Sandbox:
         """Create a sandbox with retry logic, WITHOUT managing _creating_count.
 
         This method is used when the caller manages _creating_count externally
@@ -433,7 +419,7 @@ class SandboxPool:
         Raises:
             SandboxCreationError: If sandbox creation fails after all retries
         """
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(self.config.create_retries):
             try:
@@ -450,15 +436,13 @@ class SandboxPool:
                 last_error = e
                 self._metrics.failed_creates += 1
                 logger.warning(
-                    f"Sandbox creation attempt {attempt + 1}/{self.config.create_retries} "
-                    f"failed for {self.image}: {e}"
+                    f"Sandbox creation attempt {attempt + 1}/{self.config.create_retries} failed for {self.image}: {e}"
                 )
                 if attempt < self.config.create_retries - 1:
                     await asyncio.sleep(self.config.create_retry_delay)
 
         raise SandboxCreationError(
-            f"Failed to create sandbox for {self.image} after "
-            f"{self.config.create_retries} attempts: {last_error}"
+            f"Failed to create sandbox for {self.image} after {self.config.create_retries} attempts: {last_error}"
         )
 
     async def _destroy_sandbox(self, sandbox: Sandbox) -> None:
@@ -588,9 +572,7 @@ class SandboxPool:
                 await self._destroy_sandbox(sandbox)
             else:
                 await self._ready_queue.put(_PooledSandbox(sandbox=sandbox))
-                logger.debug(
-                    f"Added sandbox to pool for {self.image}, now {self.ready_count} ready"
-                )
+                logger.debug(f"Added sandbox to pool for {self.image}, now {self.ready_count} ready")
         except asyncio.CancelledError:
             # Task was cancelled during shutdown - this is expected
             logger.debug(f"Sandbox creation cancelled for {self.image} (shutdown)")
@@ -623,9 +605,7 @@ class SandboxPool:
                 await self._destroy_sandbox(sandbox)
             else:
                 await self._ready_queue.put(_PooledSandbox(sandbox=sandbox))
-                logger.debug(
-                    f"Added sandbox to pool for {self.image}, now {self.ready_count} ready"
-                )
+                logger.debug(f"Added sandbox to pool for {self.image}, now {self.ready_count} ready")
         except asyncio.CancelledError:
             # Task was cancelled during shutdown - this is expected
             logger.debug(f"Sandbox creation cancelled for {self.image} (shutdown)")
@@ -651,7 +631,7 @@ class SandboxPool:
     async def _health_check_once(self) -> None:
         """Single health check pass."""
         # Move all items to a temp list, check them, and re-add healthy ones
-        healthy: List[_PooledSandbox] = []
+        healthy: list[_PooledSandbox] = []
         unhealthy_count = 0
 
         while not self._ready_queue.empty():
@@ -681,9 +661,7 @@ class SandboxPool:
 
         if unhealthy_count > 0:
             self._metrics.health_check_removals += unhealthy_count
-            logger.info(
-                f"Health check removed {unhealthy_count} sandboxes from {self.image} pool"
-            )
+            logger.info(f"Health check removed {unhealthy_count} sandboxes from {self.image} pool")
 
 
 class SandboxManager:
@@ -714,11 +692,11 @@ class SandboxManager:
 
     def __init__(
         self,
-        pools: Optional[Dict[str, PoolConfig]] = None,
-        default_pool_config: Optional[PoolConfig] = None,
-        max_total_sandboxes: Optional[int] = None,
+        pools: dict[str, PoolConfig] | None = None,
+        default_pool_config: PoolConfig | None = None,
+        max_total_sandboxes: int | None = None,
         max_concurrent_creates: int = 10,
-        sandbox_defaults: Optional[Dict[str, Any]] = None,
+        sandbox_defaults: dict[str, Any] | None = None,
     ):
         """Initialize the SandboxManager.
 
@@ -739,7 +717,7 @@ class SandboxManager:
         self._create_semaphore = asyncio.Semaphore(max_concurrent_creates)
 
         # Pools
-        self._pools: Dict[str, SandboxPool] = {}
+        self._pools: dict[str, SandboxPool] = {}
         self._pools_lock = asyncio.Lock()
 
         # State
@@ -748,9 +726,9 @@ class SandboxManager:
 
         # Metrics - OpenTelemetry
         self._meter = None
-        self._otel_gauges: Dict[str, Any] = {}
-        self._otel_counters: Dict[str, Any] = {}
-        self._otel_histograms: Dict[str, Any] = {}
+        self._otel_gauges: dict[str, Any] = {}
+        self._otel_counters: dict[str, Any] = {}
+        self._otel_histograms: dict[str, Any] = {}
         self._setup_otel_metrics()
 
     def _setup_otel_metrics(self) -> None:
@@ -807,10 +785,7 @@ class SandboxManager:
 
     def _total_sandbox_count(self) -> int:
         """Get total sandbox count across all pools (ready + creating + in_use)."""
-        return sum(
-            p.ready_count + p.creating_count + p.in_use_count
-            for p in self._pools.values()
-        )
+        return sum(p.ready_count + p.creating_count + p.in_use_count for p in self._pools.values())
 
     def _is_at_global_limit(self) -> bool:
         """Check if we've reached the global sandbox limit."""
@@ -848,19 +823,17 @@ class SandboxManager:
         self._started = True
 
         # Start pools for pre-configured images
-        for image, config in self._pool_configs.items():
+        for image in self._pool_configs:
             pool = await self._get_or_create_pool(image)
             await pool.start()
 
-        logger.info(
-            f"SandboxManager started with {len(self._pool_configs)} configured pools"
-        )
+        logger.info(f"SandboxManager started with {len(self._pool_configs)} configured pools")
 
     async def acquire(
         self,
         image: str,
         *,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> Sandbox:
         """Acquire a ready sandbox for the given image.
 
@@ -965,13 +938,11 @@ class SandboxManager:
                     img: f"{p.ready_count}/{self._pool_configs.get(img, self._default_config).target_ready}"
                     for img, p in self._pools.items()
                 }
-                raise WarmUpTimeoutError(
-                    f"Warm-up timeout after {timeout}s. Pool status: {status}"
-                )
+                raise WarmUpTimeoutError(f"Warm-up timeout after {timeout}s. Pool status: {status}")
 
             await asyncio.sleep(1)
 
-    def metrics(self) -> Dict[str, PoolMetrics]:
+    def metrics(self) -> dict[str, PoolMetrics]:
         """Get current metrics for all pools.
 
         Returns:
@@ -987,3 +958,207 @@ class SandboxManager:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit."""
         await self.shutdown()
+
+    # =========================================================================
+    # Snapshot integration
+    # =========================================================================
+
+    async def acquire_with_snapshot(
+        self,
+        image: str,
+        snapshot_id: str,
+        *,
+        timeout: float = 300,
+        spaces_config: SpacesConfig | None = None,
+    ) -> Sandbox:
+        """Acquire a sandbox and restore a snapshot for rapid startup.
+
+        Combines pool acquisition (instant if warm sandbox available) with
+        snapshot restoration (few seconds for typical projects).
+
+        Total wake time: ~5-15 seconds vs ~60-90s cold start.
+
+        Args:
+            image: The image identifier
+            snapshot_id: ID of snapshot to restore
+            timeout: Maximum time to wait for acquisition + restore
+            spaces_config: Spaces configuration (uses sandbox_defaults if not provided)
+
+        Returns:
+            A ready Sandbox with snapshot restored
+
+        Raises:
+            PoolShutdownError: If manager is shutting down
+            PoolExhaustedError: If pool is empty and on_empty='fail'
+            SpacesNotConfiguredError: If Spaces is not configured
+            SnapshotNotFoundError: If snapshot doesn't exist
+            SnapshotRestoreError: If restoration fails
+
+        Example:
+            >>> # Create a snapshot after setup
+            >>> meta = sandbox.create_snapshot(description="After deps install")
+            >>>
+            >>> # Later: instant acquisition with pre-installed deps
+            >>> sandbox = await manager.acquire_with_snapshot("python", meta.snapshot_id)
+            >>> # Ready in ~5-10 seconds with all dependencies!
+        """
+        # Acquire from pool
+        sandbox = await self.acquire(image, timeout=timeout)
+
+        # Get spaces config from sandbox_defaults if not provided
+        config = spaces_config or self._sandbox_defaults.get("spaces_config")
+        if config is None:
+            raise SpacesNotConfiguredError(
+                "Spaces configuration required for snapshot restoration. "
+                "Provide spaces_config parameter or include in sandbox_defaults."
+            )
+
+        # Restore snapshot
+        try:
+            from .snapshot import SnapshotManager
+
+            snapshot_mgr = SnapshotManager(config)
+            await asyncio.to_thread(snapshot_mgr.restore_snapshot, sandbox, snapshot_id, "/", int(timeout))
+        except Exception:
+            # If restore fails, clean up the sandbox
+            try:
+                await asyncio.to_thread(sandbox.delete)
+            except Exception:
+                pass
+            raise
+
+        return sandbox
+
+    async def wake_hibernated(
+        self,
+        hibernated: HibernatedSandbox,
+        *,
+        timeout: float = 300,
+    ) -> Sandbox:
+        """Wake a hibernated sandbox using the pool.
+
+        Acquires a sandbox from the pool and restores the hibernation snapshot.
+        Much faster than Sandbox.wake() without a pool.
+
+        Args:
+            hibernated: HibernatedSandbox reference from sandbox.hibernate()
+            timeout: Maximum time for acquisition + restore
+
+        Returns:
+            A new Sandbox with hibernated state restored
+
+        Example:
+            >>> # Hibernate an idle sandbox
+            >>> hibernated = sandbox.hibernate()
+            >>>
+            >>> # Later: wake using pool
+            >>> sandbox = await manager.wake_hibernated(hibernated)
+            >>> # Ready in ~5-10 seconds!
+        """
+        return await self.acquire_with_snapshot(hibernated.image, hibernated.snapshot_id, timeout=timeout)
+
+    def acquire_sync(self, image: str, timeout: float = 300) -> Sandbox:
+        """Synchronous version of acquire for use in non-async contexts.
+
+        This runs the async acquire in a new event loop or the current one.
+
+        Args:
+            image: The image identifier
+            timeout: Maximum time to wait
+
+        Returns:
+            A ready Sandbox instance
+
+        Note:
+            Prefer the async acquire() method when possible.
+        """
+        try:
+            asyncio.get_running_loop()  # Check if we're in async context
+            # We're in an async context - use nest_asyncio or thread
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self.acquire(image, timeout=timeout))
+                return future.result(timeout=timeout)
+        except RuntimeError:
+            # No running loop - we can use asyncio.run directly
+            return asyncio.run(self.acquire(image, timeout=timeout))
+
+    def acquire_with_snapshot_sync(self, image: str, snapshot_id: str, timeout: float = 300) -> Sandbox:
+        """Synchronous version of acquire_with_snapshot.
+
+        Args:
+            image: The image identifier
+            snapshot_id: ID of snapshot to restore
+            timeout: Maximum time to wait
+
+        Returns:
+            A Sandbox with the snapshot restored
+        """
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self.acquire_with_snapshot(image, snapshot_id, timeout=timeout),
+                )
+                return future.result(timeout=timeout)
+        except RuntimeError:
+            return asyncio.run(self.acquire_with_snapshot(image, snapshot_id, timeout=timeout))
+
+    def wake_hibernated_sync(self, hibernated: "HibernatedSandbox", timeout: float = 300) -> Sandbox:
+        """Synchronous version of wake_hibernated.
+
+        Args:
+            hibernated: HibernatedSandbox reference
+            timeout: Maximum time to wait
+
+        Returns:
+            A new Sandbox with hibernated state restored
+        """
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self.wake_hibernated(hibernated, timeout=timeout))
+                return future.result(timeout=timeout)
+        except RuntimeError:
+            return asyncio.run(self.wake_hibernated(hibernated, timeout=timeout))
+
+    def shutdown_sync(self, timeout: float = 30.0, wait_for_active: bool = False) -> None:
+        """Synchronous version of shutdown.
+
+        Args:
+            timeout: Maximum time to wait for graceful shutdown
+            wait_for_active: If True, wait for active sandboxes to be released
+        """
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self.shutdown(timeout=timeout, wait_for_active=wait_for_active),
+                )
+                future.result(timeout=timeout + 5)
+        except RuntimeError:
+            asyncio.run(self.shutdown(timeout=timeout, wait_for_active=wait_for_active))
+
+    def start_sync(self) -> None:
+        """Synchronous version of start.
+
+        Starts the manager and pool background tasks.
+        """
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self.start())
+                future.result(timeout=60)
+        except RuntimeError:
+            asyncio.run(self.start())

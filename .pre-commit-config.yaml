@@ -1,0 +1,27 @@
+# Pre-commit hooks for code quality
+# Install: uv run pre-commit install
+# Run manually: uv run pre-commit run --all-files
+
+repos:
+  # Ruff - Fast Python linter and formatter
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+        exclude: ^images/
+      - id: ruff-format
+        exclude: ^images/
+
+  # mypy - Static type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.1
+    hooks:
+      - id: mypy
+        additional_dependencies: []
+        args: [--ignore-missing-imports]
+        exclude: ^(tests/|images/)
+
+  # pip-audit - Dependency vulnerability scanning
+  # Note: This runs on requirements, not on every commit
+  # Run manually with: uv run pip-audit

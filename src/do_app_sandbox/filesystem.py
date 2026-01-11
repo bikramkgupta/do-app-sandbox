@@ -8,8 +8,9 @@ import base64
 import os
 import shlex
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .exceptions import FileOperationError, SpacesNotConfiguredError
 from .executor import Executor
@@ -44,7 +45,7 @@ class FileSystem:
         self,
         executor: Executor,
         spaces_client: Optional["SpacesClient"] = None,
-        sandbox_id: Optional[str] = None,
+        sandbox_id: str | None = None,
     ):
         """Initialize the file system handler.
 
@@ -74,9 +75,7 @@ class FileSystem:
             # Use base64 for binary files
             result = self._executor.execute(f"base64 {shlex.quote(path)}")
             if not result.success:
-                raise FileOperationError(
-                    f"Failed to read file {path}: {self._error_detail(result)}"
-                )
+                raise FileOperationError(f"Failed to read file {path}: {self._error_detail(result)}")
             try:
                 return base64.b64decode(result.stdout.replace("\n", ""))
             except Exception as e:
@@ -84,14 +83,10 @@ class FileSystem:
         else:
             result = self._executor.execute(f"cat {shlex.quote(path)}")
             if not result.success:
-                raise FileOperationError(
-                    f"Failed to read file {path}: {self._error_detail(result)}"
-                )
+                raise FileOperationError(f"Failed to read file {path}: {self._error_detail(result)}")
             return result.stdout
 
-    def write_file(
-        self, path: str, content: str | bytes, binary: bool = False
-    ) -> None:
+    def write_file(self, path: str, content: str | bytes, binary: bool = False) -> None:
         """Write content to a file on the sandbox.
 
         Args:
@@ -166,9 +161,7 @@ class FileSystem:
         """
         result = self._executor.execute(f"ls -la {shlex.quote(path)}")
         if not result.success:
-            raise FileOperationError(
-                f"Failed to list directory {path}: {self._error_detail(result)}"
-            )
+            raise FileOperationError(f"Failed to list directory {path}: {self._error_detail(result)}")
 
         files = []
         lines = result.stdout.strip().split("\n")
@@ -218,9 +211,7 @@ class FileSystem:
         flag = "-p" if recursive else ""
         result = self._executor.execute(f"mkdir {flag} {shlex.quote(path)}")
         if not result.success:
-            raise FileOperationError(
-                f"Failed to create directory {path}: {self._error_detail(result)}"
-            )
+            raise FileOperationError(f"Failed to create directory {path}: {self._error_detail(result)}")
 
     def rm(self, path: str, recursive: bool = False, force: bool = True) -> None:
         """Remove a file or directory.
@@ -253,9 +244,7 @@ class FileSystem:
         Returns:
             True if the path exists
         """
-        result = self._executor.execute(
-            f'test -e {shlex.quote(path)} && echo "EXISTS" || echo "MISSING"'
-        )
+        result = self._executor.execute(f'test -e {shlex.quote(path)} && echo "EXISTS" || echo "MISSING"')
         return "EXISTS" in result.stdout
 
     def is_file(self, path: str) -> bool:
@@ -267,9 +256,7 @@ class FileSystem:
         Returns:
             True if the path is a regular file
         """
-        result = self._executor.execute(
-            f'test -f {shlex.quote(path)} && echo "FILE" || echo "NOT_FILE"'
-        )
+        result = self._executor.execute(f'test -f {shlex.quote(path)} && echo "FILE" || echo "NOT_FILE"')
         return "FILE" in result.stdout and "NOT_FILE" not in result.stdout
 
     def is_dir(self, path: str) -> bool:
@@ -281,9 +268,7 @@ class FileSystem:
         Returns:
             True if the path is a directory
         """
-        result = self._executor.execute(
-            f'test -d {shlex.quote(path)} && echo "DIR" || echo "NOT_DIR"'
-        )
+        result = self._executor.execute(f'test -d {shlex.quote(path)} && echo "DIR" || echo "NOT_DIR"')
         return "DIR" in result.stdout and "NOT_DIR" not in result.stdout
 
     def copy(self, src: str, dst: str, recursive: bool = False) -> None:
@@ -298,9 +283,7 @@ class FileSystem:
             FileOperationError: If the copy fails
         """
         flag = "-r" if recursive else ""
-        result = self._executor.execute(
-            f"cp {flag} {shlex.quote(src)} {shlex.quote(dst)}"
-        )
+        result = self._executor.execute(f"cp {flag} {shlex.quote(src)} {shlex.quote(dst)}")
         if not result.success:
             raise FileOperationError(f"Failed to copy {src} to {dst}: {self._error_detail(result)}")
 
@@ -330,9 +313,7 @@ class FileSystem:
         """
         result = self._executor.execute(f"chmod {mode} {shlex.quote(path)}")
         if not result.success:
-            raise FileOperationError(
-                f"Failed to change permissions on {path}: {self._error_detail(result)}"
-            )
+            raise FileOperationError(f"Failed to change permissions on {path}: {self._error_detail(result)}")
 
     def get_size(self, path: str) -> int:
         """Get the size of a file in bytes.
@@ -392,9 +373,7 @@ class FileSystem:
         if parent_dir:
             result = self._executor.execute(f"mkdir -p {shlex.quote(parent_dir)}")
             if not result.success:
-                raise FileOperationError(
-                    f"Failed to create directory {parent_dir}: {self._error_detail(result)}"
-                )
+                raise FileOperationError(f"Failed to create directory {parent_dir}: {self._error_detail(result)}")
 
         chunk_size = self.CONSOLE_CHUNK_SIZE
         for offset in range(0, len(content), chunk_size):
@@ -412,7 +391,7 @@ class FileSystem:
                 last_error = self._error_detail(result)
                 if attempt < self.CONSOLE_MAX_RETRIES - 1:
                     # Exponential backoff: 2s, 4s, 8s...
-                    time.sleep(self.CONSOLE_RETRY_BASE_DELAY * (2 ** attempt))
+                    time.sleep(self.CONSOLE_RETRY_BASE_DELAY * (2**attempt))
             else:
                 # All retries exhausted
                 raise FileOperationError(
@@ -436,7 +415,7 @@ class FileSystem:
         self,
         local_path: str,
         remote_path: str,
-        progress_callback: Optional[Callable[[int], None]] = None,
+        progress_callback: Callable[[int], None] | None = None,
         cleanup: bool = True,
     ) -> None:
         """Upload a large file to the sandbox via DO Spaces.
@@ -500,9 +479,7 @@ class FileSystem:
             )
 
             if not result.success:
-                raise FileOperationError(
-                    f"Failed to download file to sandbox: {self._error_detail(result)}"
-                )
+                raise FileOperationError(f"Failed to download file to sandbox: {self._error_detail(result)}")
             transfer_success = True
 
         finally:
@@ -517,7 +494,7 @@ class FileSystem:
         self,
         remote_path: str,
         local_path: str,
-        progress_callback: Optional[Callable[[int], None]] = None,
+        progress_callback: Callable[[int], None] | None = None,
         cleanup: bool = True,
     ) -> None:
         """Download a large file from the sandbox via DO Spaces.
@@ -566,15 +543,11 @@ class FileSystem:
             )
 
             if not result.success:
-                raise FileOperationError(
-                    f"Failed to upload file from sandbox: {self._error_detail(result)}"
-                )
+                raise FileOperationError(f"Failed to upload file from sandbox: {self._error_detail(result)}")
 
             # Verify upload succeeded
             if not self._spaces_client.object_exists(key):
-                raise FileOperationError(
-                    f"File upload appeared to succeed but object not found in Spaces"
-                )
+                raise FileOperationError("File upload appeared to succeed but object not found in Spaces")
 
             # Step 3: Download from Spaces to local (authenticated via boto3)
             local = Path(local_path)
@@ -594,7 +567,7 @@ class FileSystem:
         self,
         local_path: str,
         remote_path: str,
-        exclude_patterns: Optional[list[str]] = None,
+        exclude_patterns: list[str] | None = None,
     ) -> None:
         """Upload a local folder to the sandbox using tar (no Python dependency).
 
@@ -667,9 +640,7 @@ class FileSystem:
             cmd = f"printf '%s' {shlex.quote(b64_data)} | base64 -d | tar xzf - -C {quoted_path}"
             result = self._executor.execute(cmd, timeout=300)
             if not result.success:
-                raise FileOperationError(
-                    f"Failed to extract folder to {remote_path}: {self._error_detail(result)}"
-                )
+                raise FileOperationError(f"Failed to extract folder to {remote_path}: {self._error_detail(result)}")
         else:
             # Write tar to temp file, then extract
             temp_tar = f"/tmp/upload_{os.urandom(8).hex()}.tar.gz"
@@ -680,9 +651,7 @@ class FileSystem:
                     timeout=300,
                 )
                 if not result.success:
-                    raise FileOperationError(
-                        f"Failed to extract folder to {remote_path}: {self._error_detail(result)}"
-                    )
+                    raise FileOperationError(f"Failed to extract folder to {remote_path}: {self._error_detail(result)}")
             finally:
                 self._executor.execute(f"rm -f {shlex.quote(temp_tar)}")
 
@@ -690,7 +659,7 @@ class FileSystem:
         self,
         remote_path: str,
         local_path: str,
-        exclude_patterns: Optional[list[str]] = None,
+        exclude_patterns: list[str] | None = None,
     ) -> None:
         """Download a folder from the sandbox using tar (no Python dependency).
 
@@ -727,10 +696,11 @@ class FileSystem:
                 break
             last_error = self._error_detail(result)
             if attempt < self.CONSOLE_MAX_RETRIES - 1:
-                time.sleep(self.CONSOLE_RETRY_BASE_DELAY * (2 ** attempt))
+                time.sleep(self.CONSOLE_RETRY_BASE_DELAY * (2**attempt))
         else:
             raise FileOperationError(
-                f"Failed to create tar archive from {remote_path} after {self.CONSOLE_MAX_RETRIES} attempts: {last_error}"
+                f"Failed to create tar archive from {remote_path} "
+                f"after {self.CONSOLE_MAX_RETRIES} attempts: {last_error}"
             )
 
         # Decode base64 and extract locally

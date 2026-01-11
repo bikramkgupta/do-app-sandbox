@@ -46,7 +46,7 @@ Tests the SandboxManager pool with simulated user workloads.
 **Usage:**
 ```bash
 cd /path/to/do-app-sandbox
-python -m tests.manager_stress.main --scenario quick_validation
+python -m tests.stress.manager_load.main --scenario quick_validation
 ```
 
 **Available Scenarios:**

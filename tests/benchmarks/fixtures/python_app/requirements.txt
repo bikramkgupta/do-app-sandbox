@@ -1,0 +1,22 @@
+# Flask web framework
+flask>=3.0.0
+
+# Database ORM
+flask-sqlalchemy>=3.1.1
+sqlalchemy>=2.0.23
+
+# Validation
+pydantic>=2.10.0
+pydantic-settings>=2.1.0
+
+# Authentication
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.0.0
+
+# HTTP client for testing
+httpx>=0.25.2
+
+# Additional common deps to reach ~150MB
+numpy>=1.26.2
+pandas>=2.1.4
+scikit-learn>=1.5.0

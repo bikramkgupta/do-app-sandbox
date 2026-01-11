@@ -211,6 +211,20 @@ Custom Dockerfiles must:
 2. Have ENTRYPOINT or CMD
 3. Optionally: Include the sandbox health server on port 9090
 
+**Service Mode Note:** If using `SandboxMode.SERVICE` (HTTP API mode) with a custom image, your Dockerfile must include the `sandbox_api` FastAPI server. The easiest approach is to base your image on one of the provided service images:
+```dockerfile
+FROM ghcr.io/bikramkgupta/sandbox-python-service:latest
+# Add your customizations here
+```
+
+## Limitations & Constraints
+
+### Streaming Output (exec_stream)
+The `exec_stream` API endpoint returns output as JSON over Server-Sent Events (SSE). It is designed for **text output only**. Binary data (non-UTF8) will be decoded with `errors='replace'`, which may corrupt binary content. For binary file transfers, use the Filesystem API (`upload_file`/`download_file`) or Spaces for large files.
+
+### Snapshot Restore Paths
+When using `acquire_with_snapshot` to restore sandbox state, the snapshot extracts to `/workspace` by default. The `sandbox_api` server lives in `/opt/sandbox_api`. **Do not include `/opt/sandbox_api` in snapshots** as overwriting it could destabilize the sandbox. Keep application code and data in `/workspace` or `/home/sandbox/app`.
+
 ## Testing
 ```bash
 pytest tests/  # Requires DIGITALOCEAN_TOKEN

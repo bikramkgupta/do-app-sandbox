@@ -5,10 +5,9 @@ Creates 25 sandboxes in parallel, runs a simple command, deletes them.
 """
 
 import asyncio
-import time
 import sys
+import time
 from dataclasses import dataclass
-from typing import Optional
 
 # Add src to path
 sys.path.insert(0, "src")
@@ -19,15 +18,16 @@ from do_app_sandbox import Sandbox
 @dataclass
 class CreateResult:
     """Result of a single sandbox creation."""
+
     index: int
     image: str
-    app_id: Optional[str] = None
+    app_id: str | None = None
     create_time_s: float = 0.0
     exec_time_s: float = 0.0
     delete_time_s: float = 0.0
     total_time_s: float = 0.0
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 async def create_and_test_sandbox(index: int, image: str, semaphore: asyncio.Semaphore) -> CreateResult:
@@ -83,9 +83,11 @@ async def main():
     print("=" * 60)
     print("STANDALONE SANDBOX CREATE TEST")
     print("=" * 60)
-    print(f"Creating {num_sandboxes} sandboxes ({num_sandboxes // 2} python, {num_sandboxes - num_sandboxes // 2} node)")
+    print(
+        f"Creating {num_sandboxes} sandboxes ({num_sandboxes // 2} python, {num_sandboxes - num_sandboxes // 2} node)"
+    )
     print(f"Max concurrent creates: {max_concurrent}")
-    print(f"Region: syd1")
+    print("Region: syd1")
     print("=" * 60)
 
     semaphore = asyncio.Semaphore(max_concurrent)
@@ -119,34 +121,36 @@ async def main():
         exec_times = [r.exec_time_s for r in successful]
         delete_times = [r.delete_time_s for r in successful]
 
-        print(f"\nCreate times:")
+        print("\nCreate times:")
         print(f"  Min: {min(create_times):.1f}s")
         print(f"  Max: {max(create_times):.1f}s")
         print(f"  Avg: {sum(create_times) / len(create_times):.1f}s")
-        print(f"  Median: {sorted(create_times)[len(create_times)//2]:.1f}s")
+        print(f"  Median: {sorted(create_times)[len(create_times) // 2]:.1f}s")
 
-        print(f"\nExec times:")
+        print("\nExec times:")
         print(f"  Min: {min(exec_times):.1f}s")
         print(f"  Max: {max(exec_times):.1f}s")
         print(f"  Avg: {sum(exec_times) / len(exec_times):.1f}s")
 
-        print(f"\nDelete times:")
+        print("\nDelete times:")
         print(f"  Min: {min(delete_times):.1f}s")
         print(f"  Max: {max(delete_times):.1f}s")
         print(f"  Avg: {sum(delete_times) / len(delete_times):.1f}s")
 
         # Print individual results
-        print(f"\nIndividual results:")
+        print("\nIndividual results:")
         print(f"{'#':>3} {'Image':>7} {'Create':>8} {'Exec':>6} {'Delete':>6} {'Total':>8} {'App ID'}")
         print("-" * 70)
         for r in sorted(results, key=lambda x: x.index):
             if r.success:
-                print(f"{r.index:>3} {r.image:>7} {r.create_time_s:>7.1f}s {r.exec_time_s:>5.1f}s {r.delete_time_s:>5.1f}s {r.total_time_s:>7.1f}s {r.app_id[:20]}...")
+                print(
+                    f"{r.index:>3} {r.image:>7} {r.create_time_s:>7.1f}s {r.exec_time_s:>5.1f}s {r.delete_time_s:>5.1f}s {r.total_time_s:>7.1f}s {r.app_id[:20]}..."
+                )
             else:
                 print(f"{r.index:>3} {r.image:>7} FAILED: {r.error[:40]}...")
 
     if failed:
-        print(f"\nFailed sandboxes:")
+        print("\nFailed sandboxes:")
         for r in failed:
             print(f"  [{r.index}] {r.image}: {r.error}")
 

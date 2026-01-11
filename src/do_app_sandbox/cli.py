@@ -13,22 +13,21 @@ Usage:
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
-import shutil
 from pathlib import Path
-from typing import Optional
 
 from .deployer import (
     DEFAULT_IMAGE_OWNER,
     DEFAULT_INSTANCE_SIZE,
     DEFAULT_REGION,
     DEFAULT_REGISTRY_HOST,
-    Deployer,
     IMAGE_REPOS,
+    Deployer,
 )
-from .sandbox import ENV_REGION, ENV_REGISTRY, Sandbox
 from .image_registry import ImageRegistry
+from .sandbox import ENV_REGION, ENV_REGISTRY, Sandbox
 
 
 def ensure_doctl_available() -> bool:
@@ -59,8 +58,7 @@ def get_images_dir() -> Path:
         return images_dir
 
     raise FileNotFoundError(
-        "Could not find images directory. "
-        "Please ensure the package is installed correctly or run from the repository."
+        "Could not find images directory. Please ensure the package is installed correctly or run from the repository."
     )
 
 
@@ -86,10 +84,7 @@ def run_command(cmd: list[str], capture: bool = False) -> tuple[int, str, str]:
 
 
 def run_command_with_retry(
-    cmd: list[str],
-    max_retries: int = 3,
-    retry_delay: int = 5,
-    description: str = "command"
+    cmd: list[str], max_retries: int = 3, retry_delay: int = 5, description: str = "command"
 ) -> tuple[int, str, str]:
     """Run a shell command with retry logic for transient failures.
 
@@ -189,15 +184,19 @@ def cmd_setup(args: argparse.Namespace) -> int:
         full_tag = f"{registry_url}/{repo_name}:{tag}"
 
         if not push_only:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Building custom image: {repo_name}:{tag}")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
             cmd = [
-                "docker", "build",
-                "--platform", "linux/amd64",
-                "-f", str(dockerfile_path),
-                "-t", full_tag,
-                str(dockerfile_path.parent)
+                "docker",
+                "build",
+                "--platform",
+                "linux/amd64",
+                "-f",
+                str(dockerfile_path),
+                "-t",
+                full_tag,
+                str(dockerfile_path.parent),
             ]
             code, _, stderr = run_command(cmd)
             if code != 0:
@@ -206,21 +205,21 @@ def cmd_setup(args: argparse.Namespace) -> int:
             print(f"Successfully built: {full_tag}")
 
         if not build_only:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Pushing {repo_name}:{tag} to {registry}...")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
             cmd = ["docker", "push", full_tag]
             code, _, stderr = run_command_with_retry(cmd, max_retries=3, retry_delay=5)
             if code != 0:
                 print(f"Error pushing image: {stderr}")
                 print("\nTip: Make sure you're logged in to DOCR:")
-                print(f"  doctl registry login")
+                print("  doctl registry login")
                 return 1
             print(f"Successfully pushed: {full_tag}")
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("Setup complete!")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"\nYour custom image is available at: {full_tag}")
         return 0
 
@@ -254,15 +253,19 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
             if not push_only:
                 # Build the image
-                print(f"\n{'='*60}")
+                print(f"\n{'=' * 60}")
                 print(f"Building {image_type}:{tag} from {dockerfile_path.name}...")
-                print(f"{'='*60}")
+                print(f"{'=' * 60}")
                 cmd = [
-                    "docker", "build",
-                    "--platform", "linux/amd64",
-                    "-f", str(dockerfile_path),
-                    "-t", full_tag,
-                    str(image_dir)
+                    "docker",
+                    "build",
+                    "--platform",
+                    "linux/amd64",
+                    "-f",
+                    str(dockerfile_path),
+                    "-t",
+                    full_tag,
+                    str(image_dir),
                 ]
                 code, _, stderr = run_command(cmd)
                 if code != 0:
@@ -272,23 +275,23 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
             if not build_only:
                 # Push the image with retry for transient network errors
-                print(f"\n{'='*60}")
+                print(f"\n{'=' * 60}")
                 print(f"Pushing {image_type}:{tag} to {registry}...")
-                print(f"{'='*60}")
+                print(f"{'=' * 60}")
                 cmd = ["docker", "push", full_tag]
                 code, _, stderr = run_command_with_retry(cmd, max_retries=3, retry_delay=5)
                 if code != 0:
                     print(f"Error pushing {image_type}:{tag}: {stderr}")
                     print("\nTip: Make sure you're logged in to DOCR:")
-                    print(f"  doctl registry login")
+                    print("  doctl registry login")
                     return 1
                 print(f"Successfully pushed: {full_tag}")
 
             built_images.append(full_tag)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Setup complete!")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"\nBuilt {len(built_images)} images to registry: {registry}")
     for img in built_images:
         print(f"  - {img}")
@@ -307,11 +310,11 @@ def cmd_create(args: argparse.Namespace) -> int:
     registry = args.registry or os.environ.get(ENV_REGISTRY) or DEFAULT_REGISTRY_HOST
     region = (args.region or os.environ.get(ENV_REGION) or DEFAULT_REGION).lower()
     instance_size = args.instance_size or DEFAULT_INSTANCE_SIZE
-    component_type = getattr(args, 'component_type', 'service') or 'service'
+    component_type = getattr(args, "component_type", "service") or "service"
 
     registry_display = f"{registry}/{DEFAULT_IMAGE_OWNER}"
 
-    print(f"Creating sandbox...")
+    print("Creating sandbox...")
     print(f"  Image: {args.image}")
     print(f"  Type: {component_type}")
     print(f"  Registry: {registry_display}")
@@ -330,13 +333,13 @@ def cmd_create(args: argparse.Namespace) -> int:
             registry=registry,
             wait_ready=not args.no_wait,
         )
-        print(f"\nSandbox created successfully!")
+        print("\nSandbox created successfully!")
         print(f"  ID: {sandbox.app_id}")
         url = sandbox.get_url()
         if url:
             print(f"  URL: {url}")
         else:
-            print(f"  URL: (none - worker has no HTTP endpoint)")
+            print("  URL: (none - worker has no HTTP endpoint)")
         print(f"  Status: {sandbox.status}")
 
         if args.no_wait:
@@ -507,10 +510,7 @@ def cmd_delete(args: argparse.Namespace) -> int:
             return 1
 
         apps = json.loads(stdout) if stdout.strip() else []
-        matching = [
-            app for app in apps
-            if app.get("spec", {}).get("name", "") == target
-        ]
+        matching = [app for app in apps if app.get("spec", {}).get("name", "") == target]
 
         if not matching:
             print(f"Sandbox '{target}' not found.")
@@ -547,10 +547,7 @@ def cmd_exec(args: argparse.Namespace) -> int:
             return 1
 
         apps = json.loads(stdout) if stdout.strip() else []
-        matching = [
-            app for app in apps
-            if app.get("spec", {}).get("name", "") == target
-        ]
+        matching = [app for app in apps if app.get("spec", {}).get("name", "") == target]
 
         if not matching:
             print(f"Sandbox '{target}' not found.")
@@ -601,6 +598,7 @@ def cmd_image_add(args: argparse.Namespace) -> int:
 
         # Start background validation process
         import subprocess
+
         validator_module = "do_app_sandbox.image_validator"
         proc = subprocess.Popen(
             [sys.executable, "-m", validator_module, args.name],
@@ -671,7 +669,7 @@ def cmd_image_status(args: argparse.Namespace) -> int:
             if args.logs:
                 print(f"\n  Validation Log ({image.validation_log}):")
                 print("  " + "-" * 50)
-                with open(image.validation_log, "r") as f:
+                with open(image.validation_log) as f:
                     for line in f:
                         print(f"  {line}", end="")
             else:
@@ -692,14 +690,16 @@ def cmd_image_list(args: argparse.Namespace) -> int:
         if args.json:
             data = []
             for img in images:
-                data.append({
-                    "name": img.name,
-                    "status": img.status,
-                    "registry": img.registry,
-                    "image_url": img.image_url,
-                    "created_at": img.created_at,
-                    "validated_at": img.validated_at,
-                })
+                data.append(
+                    {
+                        "name": img.name,
+                        "status": img.status,
+                        "registry": img.registry,
+                        "image_url": img.image_url,
+                        "created_at": img.created_at,
+                        "validated_at": img.validated_at,
+                    }
+                )
             print(json.dumps(data, indent=2))
             return 0
 
@@ -779,7 +779,8 @@ def main() -> int:
         help="Build and push sandbox images to your DOCR registry",
     )
     setup_parser.add_argument(
-        "--registry", "-r",
+        "--registry",
+        "-r",
         required=True,
         help="Your DOCR registry name",
     )
@@ -798,15 +799,18 @@ def main() -> int:
         help="Only push images, don't build",
     )
     setup_parser.add_argument(
-        "--dockerfile", "-d",
+        "--dockerfile",
+        "-d",
         help="Path to a custom Dockerfile (requires --name)",
     )
     setup_parser.add_argument(
-        "--name", "-n",
+        "--name",
+        "-n",
         help="Repository name for custom Dockerfile (e.g., 'my-sandbox')",
     )
     setup_parser.add_argument(
-        "--tag", "-t",
+        "--tag",
+        "-t",
         help="Tag for custom image (default: latest)",
     )
     setup_parser.set_defaults(func=cmd_setup)
@@ -817,13 +821,15 @@ def main() -> int:
         help="Create a new sandbox",
     )
     create_parser.add_argument(
-        "--image", "-i",
+        "--image",
+        "-i",
         required=True,
         choices=["python", "node"],
         help="Sandbox image type (required)",
     )
     create_parser.add_argument(
-        "--name", "-n",
+        "--name",
+        "-n",
         help="Name for the sandbox (auto-generated if not provided)",
     )
     create_parser.add_argument(
@@ -835,11 +841,13 @@ def main() -> int:
         help=f"Instance size slug (default: {DEFAULT_INSTANCE_SIZE})",
     )
     create_parser.add_argument(
-        "--registry", "-r",
-        help=f"DOCR registry (optional - uses GHCR public images if not set)",
+        "--registry",
+        "-r",
+        help="DOCR registry (optional - uses GHCR public images if not set)",
     )
     create_parser.add_argument(
-        "--component-type", "-t",
+        "--component-type",
+        "-t",
         choices=["service", "worker"],
         default="service",
         help="Component type: 'service' for HTTP endpoint (default), 'worker' for background process",
@@ -857,7 +865,8 @@ def main() -> int:
         help="List all sandboxes",
     )
     list_parser.add_argument(
-        "--registry", "-r",
+        "--registry",
+        "-r",
         help="Filter by DOCR registry (optional - lists all sandboxes if not set)",
     )
     list_parser.add_argument(
@@ -878,7 +887,8 @@ def main() -> int:
         help="Sandbox name to delete",
     )
     delete_parser.add_argument(
-        "--registry", "-r",
+        "--registry",
+        "-r",
         help="Filter by DOCR registry (optional)",
     )
     delete_parser.add_argument(
@@ -891,7 +901,8 @@ def main() -> int:
         help="Delete all sandboxes",
     )
     delete_parser.add_argument(
-        "--force", "-f",
+        "--force",
+        "-f",
         action="store_true",
         help="Skip confirmation prompts",
     )
@@ -911,7 +922,8 @@ def main() -> int:
         help="Command to execute",
     )
     exec_parser.add_argument(
-        "--registry", "-r",
+        "--registry",
+        "-r",
         help="DOCR registry for name lookup (optional - not needed with --id)",
     )
     exec_parser.add_argument(
@@ -921,7 +933,8 @@ def main() -> int:
         help="Treat target as app ID instead of name",
     )
     exec_parser.add_argument(
-        "--timeout", "-t",
+        "--timeout",
+        "-t",
         type=int,
         default=120,
         help="Command timeout in seconds (default: 120)",
@@ -941,17 +954,20 @@ def main() -> int:
         help="Register a custom image for validation",
     )
     image_add_parser.add_argument(
-        "--name", "-n",
+        "--name",
+        "-n",
         required=True,
         help="Unique name for the image",
     )
     image_add_parser.add_argument(
-        "--dockerfile", "-d",
+        "--dockerfile",
+        "-d",
         required=True,
         help="Path to Dockerfile",
     )
     image_add_parser.add_argument(
-        "--registry", "-r",
+        "--registry",
+        "-r",
         help=f"DOCR registry name (or set {ENV_REGISTRY})",
     )
     image_add_parser.set_defaults(func=cmd_image_add)
@@ -994,7 +1010,8 @@ def main() -> int:
         help="Image name to remove",
     )
     image_remove_parser.add_argument(
-        "--force", "-f",
+        "--force",
+        "-f",
         action="store_true",
         help="Skip confirmation prompt",
     )
