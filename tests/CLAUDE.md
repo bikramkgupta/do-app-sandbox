@@ -1,16 +1,49 @@
 # Test Suite Guide for AI Assistants
 
+## Quick Start with Makefile
+
+The recommended workflow uses shared sandboxes to speed up tests.
+**Run from the tests/ directory:**
+
+```bash
+cd tests  # Important: run from tests/ directory
+
+# Start a test session (creates shared sandboxes, ~3 min)
+make test-setup
+
+# Run tests (fast - uses shared sandboxes)
+make test-git            # Git checkout tests
+make test-service        # Service mode tests
+make test-api            # API tests
+make test-snapshot       # Snapshot tests
+make test-integration    # All integration tests
+
+# End session (cleanup)
+make test-teardown
+```
+
+Run `make help` to see all available targets.
+
 ## Quick Reference
 
 | What to Test | Where to Add | How to Run |
 |-------------|--------------|------------|
-| Pure logic, mocked | `unit/` | `pytest tests/unit/` |
-| API endpoints | `api/` | `pytest tests/api/` |
-| Real DO infra | `integration/` | `pytest tests/integration/` |
-| Full workflows | `functional/` | `python tests/functional/run_all.py` |
+| Pure logic, mocked | `unit/` | `make test-unit` |
+| API endpoints | `api/` | `make test-api` |
+| Real DO infra | `integration/` | `make test-integration` |
+| Full workflows | `functional/` | `make test-functional` |
 | Load/stress | `stress/` | See `stress/README.md` |
 | Algorithm analysis | `modeling/` | `python -m tests.modeling.pool_simulator` |
 | Performance | `benchmarks/` or `perf/` | See below |
+
+## TL;DR - The Key Distinction
+
+- **unit/**: "Does this function return the right thing?" (mocked, no cloud)
+- **api/**: "Does this HTTP endpoint return the right thing?" (container required)
+- **integration/**: "Does this feature work with real cloud resources?" (deploys sandboxes)
+- **functional/**: "Does this whole workflow work as a user would use it?" (end-to-end scenarios)
+- **stress/**: "Does this hold up under sustained load?" (hours of continuous use)
+- **modeling/**: "What parameters should we use?" (pure math, no cloud)
 
 ## Test Categories Explained
 
@@ -81,11 +114,6 @@ cd tests/modeling/pool_simulator && uv run python demand_curves.py
 - **Purpose**: Comprehensive performance measurement
 - **Tests**: Lifecycle timing, small uploads (1-4MB), large transfers (100MB via Spaces)
 - **Dependencies**: `DIGITALOCEAN_TOKEN`, optionally `SPACES_*` for large files
-
-### smoke/ - Quick Sanity Check (~2min)
-- **Purpose**: Lightweight lifecycle validation
-- **Dependencies**: `DIGITALOCEAN_TOKEN`
-- **Use**: Before deploying, after major changes
 
 ## Writing New Tests
 
@@ -160,11 +188,31 @@ APP_SANDBOX_REGISTRY=ghcr.io
 
 ## Common Patterns
 
+### Shared Sandbox Fixtures (Recommended)
+For tests that don't need exclusive sandbox access, use shared fixtures:
+```python
+def test_read_only_operation(shared_worker_sandbox):
+    # Uses sandbox from `make test-setup` or creates one if not available
+    result = shared_worker_sandbox.exec("echo hello")
+    assert result.exit_code == 0
+    # Don't delete - it's shared!
+```
+
+For tests that MUST have their own sandbox:
+```python
+@pytest.mark.requires_own_sandbox
+def test_destructive_operation(cleanup_sandboxes):
+    sandbox = Sandbox.create(image="python")
+    cleanup_sandboxes(sandbox)
+    # Do destructive things...
+```
+
 ### Cleanup Fixtures
-All integration and functional tests should use cleanup fixtures:
+Tests that create their own sandboxes should use cleanup fixtures:
 ```python
 def test_something(cleanup_sandboxes):
     sandbox = Sandbox.create(...)
+    cleanup_sandboxes(sandbox)
     # Test logic
     # cleanup_sandboxes auto-deletes on teardown
 ```

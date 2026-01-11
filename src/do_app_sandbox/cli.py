@@ -58,8 +58,7 @@ def get_images_dir() -> Path:
         return images_dir
 
     raise FileNotFoundError(
-        "Could not find images directory. "
-        "Please ensure the package is installed correctly or run from the repository."
+        "Could not find images directory. Please ensure the package is installed correctly or run from the repository."
     )
 
 

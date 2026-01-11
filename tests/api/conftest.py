@@ -3,14 +3,19 @@
 These tests validate the FastAPI server that runs inside service-mode containers.
 Can be run locally with Docker or against a deployed container.
 
-Required environment variables:
-- SANDBOX_API_URL: Base URL of the sandbox API (e.g., http://localhost:8080)
-- SANDBOX_API_TOKEN: API token for authentication
+Environment variables (in order of precedence):
+1. SANDBOX_API_URL + SANDBOX_API_TOKEN: Explicit API endpoint and token
+2. SHARED_SERVICE_SANDBOX_ID: Auto-detect from shared service sandbox (via `make test-setup`)
+3. Local Docker: Run against local container
 
-To run locally:
+To run with shared sandbox:
+    make test-setup       # Creates shared sandboxes, sets SANDBOX_API_URL
+    make test-api         # Runs API tests
+
+To run locally with Docker:
     docker build -t sandbox-api-test -f images/sandbox-python-service/Dockerfile images/
     docker run -p 8080:8080 -e SANDBOX_API_TOKEN=test-token sandbox-api-test
-    SANDBOX_API_URL=http://localhost:8080 SANDBOX_API_TOKEN=test-token pytest tests/container/
+    SANDBOX_API_URL=http://localhost:8080 SANDBOX_API_TOKEN=test-token pytest tests/api/
 """
 
 import os
@@ -27,36 +32,85 @@ sys.path.insert(0, str(src_path))
 def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line("markers", "container: mark test as container API test")
+    config.addinivalue_line("markers", "api: mark test as container API test")
 
 
 def has_container_api() -> bool:
-    """Check if container API is available."""
+    """Check if container API is available (explicit or via shared sandbox)."""
+    # Check explicit config first
     url = os.environ.get("SANDBOX_API_URL")
     token = os.environ.get("SANDBOX_API_TOKEN")
-    return bool(url and token)
+    if url and token:
+        return True
+
+    # Check for shared service sandbox
+    shared_id = os.environ.get("SHARED_SERVICE_SANDBOX_ID")
+    if shared_id:
+        return True
+
+    return False
 
 
 requires_container_api = pytest.mark.skipif(
-    not has_container_api(), reason="SANDBOX_API_URL and SANDBOX_API_TOKEN not set"
+    not has_container_api(),
+    reason="SANDBOX_API_URL/TOKEN not set. Run 'make test-setup' or provide credentials.",
 )
+
+
+def _get_shared_sandbox_api_info():
+    """Get API URL and token from shared service sandbox if available."""
+    shared_id = os.environ.get("SHARED_SERVICE_SANDBOX_ID")
+    if not shared_id:
+        return None, None
+
+    # First check if explicit URL/token are set (they take precedence)
+    url = os.environ.get("SANDBOX_API_URL")
+    token = os.environ.get("SANDBOX_API_TOKEN")
+    if url and token:
+        return url, token
+
+    # Try to get from the sandbox object
+    try:
+        from do_app_sandbox import Sandbox
+
+        sandbox = Sandbox.get_from_id(shared_id)
+        url = sandbox.get_url()
+        token = sandbox._service_token
+        return url, token
+    except Exception:
+        return None, None
 
 
 @pytest.fixture
 def api_url():
-    """Get API URL from environment."""
+    """Get API URL from environment or shared sandbox."""
+    # Check explicit URL first
     url = os.environ.get("SANDBOX_API_URL")
-    if not url:
-        pytest.skip("SANDBOX_API_URL not set")
-    return url.rstrip("/")
+    if url:
+        return url.rstrip("/")
+
+    # Try shared sandbox
+    url, _ = _get_shared_sandbox_api_info()
+    if url:
+        return url.rstrip("/")
+
+    pytest.skip("SANDBOX_API_URL not set. Run 'make test-setup' first.")
 
 
 @pytest.fixture
 def api_token():
-    """Get API token from environment."""
+    """Get API token from environment or shared sandbox."""
+    # Check explicit token first
     token = os.environ.get("SANDBOX_API_TOKEN")
-    if not token:
-        pytest.skip("SANDBOX_API_TOKEN not set")
-    return token
+    if token:
+        return token
+
+    # Try shared sandbox
+    _, token = _get_shared_sandbox_api_info()
+    if token:
+        return token
+
+    pytest.skip("SANDBOX_API_TOKEN not set. Run 'make test-setup' first.")
 
 
 @pytest.fixture

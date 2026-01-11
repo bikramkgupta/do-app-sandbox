@@ -1,20 +1,45 @@
+# =============================================================================
 # DO App Sandbox - Development Makefile
+# =============================================================================
 # Run `make help` to see available commands
+#
+# For test commands, see tests/Makefile:
+#   cd tests && make help
+# =============================================================================
 
-.PHONY: help lint format type-check security check fix test test-unit install clean
+.PHONY: help install lint format type-check security check fix clean
+
+# =============================================================================
+# Help
+# =============================================================================
 
 help:
-	@echo "Available commands:"
-	@echo "  make install     - Install dependencies"
-	@echo "  make lint        - Run Ruff linter"
-	@echo "  make format      - Format code with Ruff"
-	@echo "  make type-check  - Run mypy type checker"
-	@echo "  make security    - Run pip-audit security scan"
-	@echo "  make check       - Run all checks (lint + type-check + security)"
-	@echo "  make fix         - Auto-fix linting issues and format"
-	@echo "  make test        - Run all tests"
-	@echo "  make test-unit   - Run unit tests only"
-	@echo "  make clean       - Remove build artifacts"
+	@echo ""
+	@echo "DO App Sandbox - Development Commands"
+	@echo "======================================"
+	@echo ""
+	@echo "Development:"
+	@echo "  make install       Install dependencies"
+	@echo "  make lint          Run Ruff linter"
+	@echo "  make format        Format code with Ruff"
+	@echo "  make type-check    Run mypy type checker"
+	@echo "  make security      Run pip-audit security scan"
+	@echo "  make check         Run all checks (lint + type-check)"
+	@echo "  make fix           Auto-fix linting issues and format"
+	@echo "  make clean         Remove build artifacts"
+	@echo ""
+	@echo "Testing:"
+	@echo "  cd tests && make help    See test commands"
+	@echo ""
+	@echo "Quick test examples:"
+	@echo "  cd tests && make test-setup     # Create shared sandboxes"
+	@echo "  cd tests && make test-git       # Run git tests"
+	@echo "  cd tests && make test-teardown  # Cleanup"
+	@echo ""
+
+# =============================================================================
+# Development
+# =============================================================================
 
 install:
 	uv sync --extra dev
@@ -37,12 +62,6 @@ check: lint type-check
 fix:
 	uv run ruff check --fix src/ tests/
 	uv run ruff format src/ tests/
-
-test:
-	uv run pytest tests/ -v
-
-test-unit:
-	uv run pytest tests/unit/ -v
 
 clean:
 	rm -rf build/ dist/ *.egg-info/ .mypy_cache/ .pytest_cache/ .ruff_cache/

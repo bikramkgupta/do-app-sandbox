@@ -1,13 +1,11 @@
 """Tests for sandbox.py - Sandbox State Machine Tests."""
 
-import time
 from unittest.mock import patch
 
 import pytest
 
 from do_app_sandbox.exceptions import SandboxHibernatedError
 from do_app_sandbox.types import (
-    HibernationConfig,
     SandboxMode,
     SandboxState,
 )
@@ -45,85 +43,6 @@ class TestInitialState:
                 sandbox = Sandbox(app_id="test-app-123", _mode=SandboxMode.SERVICE, _service_token="test-token")
 
                 assert sandbox._mode == SandboxMode.SERVICE
-
-
-class TestActivityTracking:
-    """Tests for activity tracking."""
-
-    def test_record_activity_updates_timestamp(self):
-        """_record_activity() updates timestamp."""
-        with patch("do_app_sandbox.sandbox._ensure_doctl_available"):
-            with patch("do_app_sandbox.sandbox.Executor"):
-                from do_app_sandbox.sandbox import Sandbox
-
-                sandbox = Sandbox(app_id="test-app-123")
-                old_time = sandbox._last_activity
-
-                time.sleep(0.01)  # Small delay
-                sandbox._record_activity()
-
-                assert sandbox._last_activity > old_time
-
-    def test_last_activity_initialized(self):
-        """_last_activity is initialized to current time."""
-        with patch("do_app_sandbox.sandbox._ensure_doctl_available"):
-            with patch("do_app_sandbox.sandbox.Executor"):
-                from do_app_sandbox.sandbox import Sandbox
-
-                before = time.time()
-                sandbox = Sandbox(app_id="test-app-123")
-                after = time.time()
-
-                assert before <= sandbox._last_activity <= after
-
-
-class TestIdleDetection:
-    """Tests for idle detection."""
-
-    def test_is_idle_returns_true_after_sleep_after(self):
-        """_is_idle() returns True after sleep_after seconds."""
-        with patch("do_app_sandbox.sandbox._ensure_doctl_available"):
-            with patch("do_app_sandbox.sandbox.Executor"):
-                from do_app_sandbox.sandbox import Sandbox
-
-                config = HibernationConfig(sleep_after=1)  # 1 second
-                sandbox = Sandbox(app_id="test-app-123", _hibernation_config=config)
-
-                # Initially not idle
-                assert sandbox._is_idle() is False
-
-                # Simulate time passing
-                sandbox._last_activity = time.time() - 2  # 2 seconds ago
-
-                assert sandbox._is_idle() is True
-
-    def test_is_idle_returns_false_with_active_streams(self):
-        """_is_idle() returns False with active streams."""
-        with patch("do_app_sandbox.sandbox._ensure_doctl_available"):
-            with patch("do_app_sandbox.sandbox.Executor"):
-                from do_app_sandbox.sandbox import Sandbox
-
-                config = HibernationConfig(sleep_after=1)
-                sandbox = Sandbox(app_id="test-app-123", _hibernation_config=config)
-
-                # Simulate old last_activity but active stream
-                sandbox._last_activity = time.time() - 10
-                sandbox._active_streams = 1
-
-                assert sandbox._is_idle() is False
-
-    def test_is_idle_returns_false_when_recently_active(self):
-        """_is_idle() returns False when recently active."""
-        with patch("do_app_sandbox.sandbox._ensure_doctl_available"):
-            with patch("do_app_sandbox.sandbox.Executor"):
-                from do_app_sandbox.sandbox import Sandbox
-
-                config = HibernationConfig(sleep_after=600)  # 10 minutes
-                sandbox = Sandbox(app_id="test-app-123", _hibernation_config=config)
-
-                sandbox._record_activity()
-
-                assert sandbox._is_idle() is False
 
 
 class TestEnsureAwake:
@@ -225,33 +144,6 @@ class TestImageProperty:
                 sandbox = Sandbox(app_id="test-app-123", _image="node")
 
                 assert sandbox.image == "node"
-
-
-class TestHibernationConfigDefault:
-    """Tests for default hibernation config."""
-
-    def test_default_hibernation_config(self):
-        """Default HibernationConfig is applied."""
-        with patch("do_app_sandbox.sandbox._ensure_doctl_available"):
-            with patch("do_app_sandbox.sandbox.Executor"):
-                from do_app_sandbox.sandbox import Sandbox
-
-                sandbox = Sandbox(app_id="test-app-123")
-
-                assert sandbox._hibernation_config.enabled is True
-                assert sandbox._hibernation_config.sleep_after == 600
-
-    def test_custom_hibernation_config(self):
-        """Custom HibernationConfig is used when provided."""
-        with patch("do_app_sandbox.sandbox._ensure_doctl_available"):
-            with patch("do_app_sandbox.sandbox.Executor"):
-                from do_app_sandbox.sandbox import Sandbox
-
-                config = HibernationConfig(enabled=False, sleep_after=300)
-                sandbox = Sandbox(app_id="test-app-123", _hibernation_config=config)
-
-                assert sandbox._hibernation_config.enabled is False
-                assert sandbox._hibernation_config.sleep_after == 300
 
 
 class TestServiceClient:

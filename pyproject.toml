@@ -1,6 +1,6 @@
 [project]
 name = "do-app-sandbox"
-version = "0.1.5"
+version = "0.2.0"
 description = "Experimental sandbox API for DigitalOcean App Platform - provides sandbox-like capabilities similar to Cloudflare Sandbox"
 readme = "README.md"
 license = {text = "MIT"}
@@ -78,6 +78,7 @@ dev = [
     "mypy>=1.14.0",
     "pip-audit>=2.7.0",
     "pre-commit>=4.0.0",
+    "python-dotenv>=1.0.0",
 ]
 
 # =============================================================================

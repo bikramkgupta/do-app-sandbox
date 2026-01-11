@@ -44,17 +44,6 @@ class ServiceConfig:
         return f"ServiceConfig(api_port={self.api_port}, proxy_ports={self.proxy_ports})"
 
 
-@dataclass
-class HibernationConfig:
-    """Configuration for sandbox hibernation (Cloudflare-aligned)."""
-
-    enabled: bool = True
-    sleep_after: int = 600  # Seconds of inactivity before hibernate (default: 10 min)
-
-    def __repr__(self) -> str:
-        return f"HibernationConfig(enabled={self.enabled}, sleep_after={self.sleep_after}s)"
-
-
 # =============================================================================
 # Streaming Types
 # =============================================================================

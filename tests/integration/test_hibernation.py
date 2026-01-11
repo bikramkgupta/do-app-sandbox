@@ -28,7 +28,7 @@ class TestHibernate:
         sandbox = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
 
         # Create some state
-        sandbox.exec("echo 'hibernation test' > /workspace/state.txt")
+        sandbox.exec("echo 'hibernation test' > /home/sandbox/app/state.txt")
 
         # Hibernate (this deletes the sandbox)
         hibernated = sandbox.hibernate()
@@ -87,7 +87,7 @@ class TestWake:
 
         # Create and hibernate
         sandbox1 = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
-        sandbox1.exec("echo 'wake test' > /workspace/wake.txt")
+        sandbox1.exec("echo 'wake test' > /home/sandbox/app/wake.txt")
 
         hibernated = sandbox1.hibernate()
         cleanup_snapshots(hibernated.snapshot_id)
@@ -108,7 +108,7 @@ class TestWake:
 
         # Create and hibernate
         sandbox1 = Sandbox.create(image="python", api_token=do_token, spaces_config=spaces_config, wait_ready=True)
-        sandbox1.exec(f"echo '{unique_content}' > /workspace/restore-test.txt")
+        sandbox1.exec(f"echo '{unique_content}' > /home/sandbox/app/restore-test.txt")
 
         hibernated = sandbox1.hibernate()
         cleanup_snapshots(hibernated.snapshot_id)
@@ -118,7 +118,7 @@ class TestWake:
         cleanup_sandboxes(sandbox2)
 
         # Verify content restored
-        result = sandbox2.exec("cat /workspace/restore-test.txt")
+        result = sandbox2.exec("cat /home/sandbox/app/restore-test.txt")
         assert unique_content in result.stdout
 
 

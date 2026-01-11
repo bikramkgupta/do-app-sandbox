@@ -35,7 +35,6 @@ from .types import (
     ExposedPort,
     GitCredentials,
     HibernatedSandbox,
-    HibernationConfig,
     ProcessInfo,
     SandboxMode,
     SandboxState,
@@ -207,7 +206,6 @@ class Sandbox:
         _service_config: ServiceConfig | None = None,
         _service_token: str | None = None,
         _image: str = "python",
-        _hibernation_config: HibernationConfig | None = None,
     ):
         """Initialize a Sandbox instance.
 
@@ -225,7 +223,6 @@ class Sandbox:
             _service_config: Configuration for service mode
             _service_token: Auth token for service mode API
             _image: Image type used (python, node)
-            _hibernation_config: Hibernation settings
         """
         self._app_id = app_id
         self._component = component
@@ -238,11 +235,9 @@ class Sandbox:
         self._service_config = _service_config
         self._service_token = _service_token
         self._image = _image
-        self._hibernation_config = _hibernation_config or HibernationConfig()
 
         # State tracking
         self._state = SandboxState.ACTIVE
-        self._last_activity = time.time()
         self._active_streams = 0
 
         # Service client (lazy initialized for service mode)
@@ -314,7 +309,6 @@ class Sandbox:
         instance_size: str | None = None,
         mode: SandboxMode = SandboxMode.WORKER,
         service_config: ServiceConfig | None = None,
-        hibernation_config: HibernationConfig | None = None,
         registry: str | None = None,
         api_token: str | None = None,
         wait_ready: bool = True,
@@ -336,7 +330,6 @@ class Sandbox:
             mode: SandboxMode.WORKER (default) for doctl console execution,
                 SandboxMode.SERVICE for HTTP API with streaming support.
             service_config: Configuration for service mode (API port, proxy ports, etc.)
-            hibernation_config: Configuration for auto-hibernation behavior
             registry: Optional registry host. If not provided, uses public
                 GHCR images from ghcr.io/bikramkgupta/.
             api_token: DigitalOcean API token (uses DIGITALOCEAN_TOKEN env if not set)
@@ -423,7 +416,6 @@ class Sandbox:
             _service_config=service_config,
             _service_token=service_token,
             _image=image,
-            _hibernation_config=hibernation_config,
         )
         sandbox._url = app_info.url
 
@@ -526,7 +518,6 @@ class Sandbox:
             0
         """
         self._ensure_awake()
-        self._record_activity()
 
         if self._mode == SandboxMode.SERVICE:
             client = self._get_service_client()
@@ -668,7 +659,7 @@ class Sandbox:
             time.sleep(poll_interval)
 
         raise SandboxNotReadyError(
-            f"Timed out waiting for sandbox to be ready after {timeout}s. " f"Last status: {last_status}"
+            f"Timed out waiting for sandbox to be ready after {timeout}s. Last status: {last_status}"
         )
 
     def __repr__(self) -> str:
@@ -702,21 +693,6 @@ class Sandbox:
         """Ensure sandbox is not hibernated before operations."""
         if self._state == SandboxState.HIBERNATED:
             raise SandboxHibernatedError("Sandbox is hibernated. Use Sandbox.wake() to restore it.")
-
-    def _record_activity(self) -> None:
-        """Record activity to reset the idle timer."""
-        self._last_activity = time.time()
-
-    def _is_idle(self) -> bool:
-        """Check if sandbox is idle (ready to hibernate).
-
-        Returns:
-            True if no activity for sleep_after seconds and no active streams
-        """
-        if self._active_streams > 0:
-            return False
-        idle_time = time.time() - self._last_activity
-        return idle_time > self._hibernation_config.sleep_after
 
     # =========================================================================
     # Properties
@@ -781,14 +757,10 @@ class Sandbox:
         self._active_streams += 1
 
         try:
-            self._record_activity()
             client = self._get_service_client()
-            for event in client.exec_stream(command, env=env, cwd=cwd, timeout=timeout):
-                self._record_activity()
-                yield event
+            yield from client.exec_stream(command, env=env, cwd=cwd, timeout=timeout)
         finally:
             self._active_streams -= 1
-            self._record_activity()
 
     # =========================================================================
     # Port exposure (service mode)
@@ -918,7 +890,9 @@ class Sandbox:
 
         Args:
             snapshot_id: Optional ID (auto-generated if not provided)
-            paths: Paths to include (default: ["/workspace"])
+            paths: Paths to include. Defaults to mode-appropriate working directory:
+                   - Service mode: ["/workspace"]
+                   - Worker mode: ["/home/sandbox/app"]
             description: Optional human-readable description
             tags: Optional key-value tags
             timeout: Timeout for archive/upload in seconds
@@ -937,6 +911,13 @@ class Sandbox:
             >>> print(f"Snapshot: {meta.snapshot_id}, Size: {meta.size_bytes}")
         """
         self._ensure_awake()
+
+        # Auto-select paths based on mode if not specified
+        if paths is None:
+            if self._mode == SandboxMode.SERVICE:
+                paths = ["/workspace"]
+            else:
+                paths = ["/home/sandbox/app"]
 
         from .snapshot import SnapshotManager
 
@@ -1013,11 +994,16 @@ class Sandbox:
         if self._state == SandboxState.HIBERNATED:
             raise SandboxHibernatedError("Sandbox is already hibernated")
 
-        # Create hibernation snapshot
+        # Create hibernation snapshot with mode-appropriate paths
+        # Note: /tmp is excluded because snapshot archive is created there, causing race conditions
         snapshot_id = f"hibernate-{self._app_id}-{int(time.time())}"
+        if self._mode == SandboxMode.SERVICE:
+            hibernate_paths = ["/workspace"]
+        else:
+            hibernate_paths = ["/home/sandbox/app"]
         self.create_snapshot(
             snapshot_id=snapshot_id,
-            paths=["/workspace", "/home", "/tmp"],
+            paths=hibernate_paths,
             description=f"Hibernation snapshot for {self._app_id}",
         )
 

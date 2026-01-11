@@ -89,27 +89,29 @@ def run_tests(image: str = "python") -> TestResult:
     try:
         # Test 1: Create sandbox
         print("\n[1/10] Creating sandbox...")
-        tc = run_test_case(
-            "create_sandbox",
-            lambda: Sandbox.create(
-                image=image,
-                name=f"func-test-{int(time.time())}",
-                wait_ready=True,
-                timeout=300,
-            ),
-        )
-        if tc.passed:
-            sandbox = tc.details if isinstance(tc.details, Sandbox) else None
-            # Re-run to get sandbox object
+        create_start = time.time()
+        try:
             sandbox = Sandbox.create(
                 image=image,
                 name=f"func-test-{int(time.time())}",
                 wait_ready=True,
                 timeout=300,
             )
-            tc.details = f"app_id: {sandbox.app_id}"
+            tc = TestCase(
+                name="create_sandbox",
+                passed=True,
+                duration_s=time.time() - create_start,
+                details=f"app_id: {sandbox.app_id}",
+            )
             result.app_id = sandbox.app_id
             result.url = sandbox.get_url()
+        except Exception as e:
+            tc = TestCase(
+                name="create_sandbox",
+                passed=False,
+                duration_s=time.time() - create_start,
+                error=str(e),
+            )
         test_cases.append(tc)
         print(f"  {'PASS' if tc.passed else 'FAIL'}: {tc.details or tc.error}")
 
