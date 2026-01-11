@@ -6,22 +6,28 @@ applications using doctl CLI commands.
 
 import json
 import os
+import secrets
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, Optional, Union
 
 from .exceptions import SandboxCreationError, SandboxNotFoundError
-from .types import AppInfo
+from .types import AppInfo, SandboxMode, ServiceConfig
 
 # Environment variables for GHCR configuration
-ENV_GHCR_OWNER = "GHCR_OWNER"        # Image owner/namespace (default: bikramkgupta)
+ENV_GHCR_OWNER = "GHCR_OWNER"  # Image owner/namespace (default: bikramkgupta)
 
 # Image repository names
 IMAGE_REPOS = {
     "python": "sandbox-python",
     "node": "sandbox-node",
+}
+
+# Service mode image repository names (with built-in API server)
+SERVICE_IMAGE_REPOS = {
+    "python": "sandbox-python-service",
+    "node": "sandbox-node-service",
 }
 
 # Default image tags (override with env APP_SANDBOX_PYTHON_TAG / APP_SANDBOX_NODE_TAG)
@@ -76,6 +82,44 @@ workers:
     instance_size_slug: {instance_size}
 """
 
+# Streaming service spec template - HTTP/2 with cache disabled for SSE
+# Uses service image with built-in FastAPI server for streaming
+STREAMING_SERVICE_SPEC_TEMPLATE = """name: {sandbox_name}
+region: {region}
+services:
+  - name: sandbox
+    image:
+      registry_type: {registry_type}
+      registry: {registry}
+      repository: {repository}
+      tag: {tag}
+    instance_count: 1
+    instance_size_slug: {instance_size}
+    http_port: 8080
+    envs:
+      - key: SANDBOX_API_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+        value: "{api_token}"
+      - key: SANDBOX_MODE
+        scope: RUN_TIME
+        value: "service"
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 5
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+ingress:
+  rules:
+    - component:
+        name: sandbox
+      match:
+        path:
+          prefix: /
+"""
+
 # Default values - region must include datacenter number (e.g., atl1, nyc1, sfo3)
 DEFAULT_REGION = "atl1"
 DEFAULT_INSTANCE_SIZE = "apps-s-1vcpu-1gb"
@@ -86,12 +130,12 @@ class Deployer:
 
     def __init__(
         self,
-        registry: Optional[str] = None,
+        registry: str | None = None,
         registry_type: str = "GHCR",
-        owner: Optional[str] = None,
+        owner: str | None = None,
         region: str = DEFAULT_REGION,
         instance_size: str = DEFAULT_INSTANCE_SIZE,
-        api_token: Optional[str] = None,
+        api_token: str | None = None,
     ):
         """Initialize the deployer.
 
@@ -111,9 +155,7 @@ class Deployer:
         # Token is optional - doctl uses its own auth if not provided
         self.api_token = api_token or os.environ.get("DIGITALOCEAN_TOKEN")
 
-    def _run_doctl(
-        self, args: list[str], timeout: int = 120, capture_json: bool = True
-    ) -> tuple[int, str, str]:
+    def _run_doctl(self, args: list[str], timeout: int = 120, capture_json: bool = True) -> tuple[int, str, str]:
         """Run a doctl command.
 
         Args:
@@ -154,63 +196,102 @@ class Deployer:
         name: str,
         image: str,
         component_type: str = "service",
-    ) -> str:
+        mode: SandboxMode = SandboxMode.WORKER,
+        service_config: ServiceConfig | None = None,
+    ) -> tuple[str, str | None]:
         """Generate an app spec YAML for a sandbox.
 
         Args:
             name: The sandbox name
             image: The image type ("python" or "node")
             component_type: "service" for HTTP endpoint, "worker" for background process
+            mode: SandboxMode.WORKER (default) or SandboxMode.SERVICE (streaming)
+            service_config: Configuration for service mode
 
         Returns:
-            The app spec YAML string
+            Tuple of (app spec YAML string, API token if service mode else None)
         """
-        repository = IMAGE_REPOS.get(image, IMAGE_REPOS["python"])
         tag = IMAGE_TAGS.get(image, "latest")
         registry_value = self.registry or self.owner
-        repository_path = repository
 
-        # Select template based on component type
-        template = SERVICE_SPEC_TEMPLATE if component_type == "service" else WORKER_SPEC_TEMPLATE
+        # Select repository based on mode
+        if mode == SandboxMode.SERVICE:
+            repository = SERVICE_IMAGE_REPOS.get(image, SERVICE_IMAGE_REPOS["python"])
+        else:
+            repository = IMAGE_REPOS.get(image, IMAGE_REPOS["python"])
 
-        spec = template.format(
-            sandbox_name=name,
-            registry_type=self.registry_type,
-            registry=registry_value,
-            repository=repository_path,
-            tag=tag,
-            region=self.region,
-            instance_size=self.instance_size,
-        )
+        # Generate API token for service mode
+        api_token = None
+        if mode == SandboxMode.SERVICE:
+            config = service_config or ServiceConfig()
+            api_token = config.token or secrets.token_urlsafe(32)
 
-        return spec
+        # Select template based on mode
+        if mode == SandboxMode.SERVICE:
+            template = STREAMING_SERVICE_SPEC_TEMPLATE
+            spec = template.format(
+                sandbox_name=name,
+                registry_type=self.registry_type,
+                registry=registry_value,
+                repository=repository,
+                tag=tag,
+                region=self.region,
+                instance_size=self.instance_size,
+                api_token=api_token,
+            )
+        elif component_type == "service":
+            template = SERVICE_SPEC_TEMPLATE
+            spec = template.format(
+                sandbox_name=name,
+                registry_type=self.registry_type,
+                registry=registry_value,
+                repository=repository,
+                tag=tag,
+                region=self.region,
+                instance_size=self.instance_size,
+            )
+        else:
+            template = WORKER_SPEC_TEMPLATE
+            spec = template.format(
+                sandbox_name=name,
+                registry_type=self.registry_type,
+                registry=registry_value,
+                repository=repository,
+                tag=tag,
+                region=self.region,
+                instance_size=self.instance_size,
+            )
+
+        return spec, api_token
 
     def create_app(
         self,
         name: str,
         image: str = "python",
         component_type: str = "service",
-    ) -> AppInfo:
+        mode: SandboxMode = SandboxMode.WORKER,
+        service_config: ServiceConfig | None = None,
+    ) -> tuple[AppInfo, str | None]:
         """Create a new App Platform application.
 
         Args:
             name: The app name
             image: The image type ("python" or "node")
             component_type: "service" for HTTP endpoint, "worker" for background process
+            mode: SandboxMode.WORKER (default) or SandboxMode.SERVICE (streaming)
+            service_config: Configuration for service mode
 
         Returns:
-            AppInfo with the created app details
+            Tuple of (AppInfo with the created app details, API token if service mode)
 
         Raises:
             SandboxCreationError: If app creation fails
         """
         # Generate app spec
-        spec = self._generate_app_spec(name, image, component_type)
+        spec, api_token = self._generate_app_spec(name, image, component_type, mode, service_config)
 
         # Write spec to temp file
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(spec)
             spec_path = f.name
 
@@ -232,7 +313,7 @@ class Deployer:
                 if isinstance(data, list):
                     data = data[0]
 
-                return AppInfo(
+                app_info = AppInfo(
                     app_id=data.get("id", ""),
                     name=data.get("spec", {}).get("name", name),
                     status=data.get("active_deployment", {}).get("phase", "PENDING"),
@@ -241,6 +322,7 @@ class Deployer:
                     created_at=data.get("created_at"),
                     updated_at=data.get("updated_at"),
                 )
+                return app_info, api_token
             except json.JSONDecodeError as e:
                 raise SandboxCreationError(f"Failed to parse response: {e}")
 
@@ -349,9 +431,7 @@ class Deployer:
                 return app_info
 
             if status in ("ERROR", "FAILED"):
-                raise SandboxCreationError(
-                    f"App deployment failed with status: {status}"
-                )
+                raise SandboxCreationError(f"App deployment failed with status: {status}")
 
             time.sleep(poll_interval)
 

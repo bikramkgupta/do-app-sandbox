@@ -5,7 +5,7 @@ Sandbox class using asyncio.to_thread for non-blocking operations.
 """
 
 import asyncio
-from typing import Callable, Dict, Optional, Union
+from collections.abc import Callable
 
 from .sandbox import Sandbox
 from .types import CommandResult, ProcessInfo, SpacesConfig
@@ -19,17 +19,11 @@ class AsyncFileSystem:
 
     async def read_file(self, path: str, binary: bool = False) -> str | bytes:
         """Read a file from the sandbox asynchronously."""
-        return await asyncio.to_thread(
-            self._sync_sandbox.filesystem.read_file, path, binary
-        )
+        return await asyncio.to_thread(self._sync_sandbox.filesystem.read_file, path, binary)
 
-    async def write_file(
-        self, path: str, content: str | bytes, binary: bool = False
-    ) -> None:
+    async def write_file(self, path: str, content: str | bytes, binary: bool = False) -> None:
         """Write content to a file asynchronously."""
-        await asyncio.to_thread(
-            self._sync_sandbox.filesystem.write_file, path, content, binary
-        )
+        await asyncio.to_thread(self._sync_sandbox.filesystem.write_file, path, content, binary)
 
     async def append_file(self, path: str, content: str) -> None:
         """Append content to a file asynchronously."""
@@ -37,15 +31,11 @@ class AsyncFileSystem:
 
     async def upload_file(self, local_path: str, remote_path: str) -> None:
         """Upload a local file to the sandbox asynchronously."""
-        await asyncio.to_thread(
-            self._sync_sandbox.filesystem.upload_file, local_path, remote_path
-        )
+        await asyncio.to_thread(self._sync_sandbox.filesystem.upload_file, local_path, remote_path)
 
     async def download_file(self, remote_path: str, local_path: str) -> None:
         """Download a file from the sandbox asynchronously."""
-        await asyncio.to_thread(
-            self._sync_sandbox.filesystem.download_file, remote_path, local_path
-        )
+        await asyncio.to_thread(self._sync_sandbox.filesystem.download_file, remote_path, local_path)
 
     async def list_dir(self, path: str = ".") -> list:
         """List directory contents asynchronously."""
@@ -57,9 +47,7 @@ class AsyncFileSystem:
 
     async def rm(self, path: str, recursive: bool = False, force: bool = True) -> None:
         """Remove a file or directory asynchronously."""
-        await asyncio.to_thread(
-            self._sync_sandbox.filesystem.rm, path, recursive, force
-        )
+        await asyncio.to_thread(self._sync_sandbox.filesystem.rm, path, recursive, force)
 
     async def exists(self, path: str) -> bool:
         """Check if a path exists asynchronously."""
@@ -93,7 +81,7 @@ class AsyncFileSystem:
         self,
         local_path: str,
         remote_path: str,
-        progress_callback: Optional[Callable[[int], None]] = None,
+        progress_callback: Callable[[int], None] | None = None,
         cleanup: bool = False,
     ) -> None:
         """Upload a large file to the sandbox via DO Spaces asynchronously.
@@ -123,7 +111,7 @@ class AsyncFileSystem:
         self,
         remote_path: str,
         local_path: str,
-        progress_callback: Optional[Callable[[int], None]] = None,
+        progress_callback: Callable[[int], None] | None = None,
         cleanup: bool = False,
     ) -> None:
         """Download a large file from the sandbox via DO Spaces asynchronously.
@@ -237,17 +225,17 @@ class AsyncSandbox:
     @classmethod
     async def create(
         cls,
-        registry: Optional[str] = None,
+        registry: str | None = None,
         *,
         image: str,
-        name: Optional[str] = None,
-        region: Optional[str] = None,
-        instance_size: Optional[str] = None,
+        name: str | None = None,
+        region: str | None = None,
+        instance_size: str | None = None,
         component_type: str = "service",
-        api_token: Optional[str] = None,
+        api_token: str | None = None,
         wait_ready: bool = True,
         timeout: int = 600,
-        spaces_config: Optional[Union[SpacesConfig, Dict]] = None,
+        spaces_config: SpacesConfig | dict | None = None,
     ) -> "AsyncSandbox":
         """Create a new sandbox environment asynchronously.
 
@@ -301,10 +289,10 @@ class AsyncSandbox:
     async def get_from_id(
         cls,
         app_id: str,
-        registry: Optional[str] = None,
+        registry: str | None = None,
         component: str = "sandbox",
-        api_token: Optional[str] = None,
-        spaces_config: Optional[Union[SpacesConfig, Dict]] = None,
+        api_token: str | None = None,
+        spaces_config: SpacesConfig | dict | None = None,
     ) -> "AsyncSandbox":
         """Connect to an existing sandbox asynchronously.
 
@@ -354,8 +342,8 @@ class AsyncSandbox:
     async def exec(
         self,
         command: str,
-        env: Optional[dict[str, str]] = None,
-        cwd: Optional[str] = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
         timeout: int = 120,
     ) -> CommandResult:
         """Execute a command asynchronously.
@@ -384,8 +372,8 @@ class AsyncSandbox:
     async def launch_process(
         self,
         command: str,
-        cwd: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> int:
         """Launch a background process asynchronously.
 
@@ -404,11 +392,9 @@ class AsyncSandbox:
             env=env,
         )
 
-    async def list_processes(self, pattern: Optional[str] = None) -> list[ProcessInfo]:
+    async def list_processes(self, pattern: str | None = None) -> list[ProcessInfo]:
         """List running processes asynchronously."""
-        return await asyncio.to_thread(
-            self._sync_sandbox.list_processes, pattern
-        )
+        return await asyncio.to_thread(self._sync_sandbox.list_processes, pattern)
 
     async def kill_process(self, pid: int) -> bool:
         """Kill a process asynchronously."""

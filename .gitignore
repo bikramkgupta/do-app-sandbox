@@ -18,12 +18,18 @@ ENV/
 
 # Testing
 .pytest_cache/
-tests/artifacts/*.log
-tests/artifacts/*.log.*
-tests/artifacts/*.txt
-tests/artifacts/*.json
-tests/artifacts/stress/
+tests/artifacts/
 !tests/artifacts/.gitkeep
+tests/functional/results/
+tests/benchmarks/results/
+tests/benchmarks/fixtures/*/node_modules/
+tests/benchmarks/fixtures/*/.venv/
+
+# Type checking
+.mypy_cache/
+
+# Pre-commit
+.pre-commit-cache/
 
 # Stress test execution programs (generated)
 sandbox-execution-programs/
@@ -40,6 +46,7 @@ Thumbs.db
 
 # Temp files
 sandbox_*_info.txt
+logging.json
 
 # Claude Code logs
 .claude-logs/

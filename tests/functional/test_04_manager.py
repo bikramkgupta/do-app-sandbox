@@ -11,39 +11,40 @@ Tests the SandboxManager features:
 """
 
 import asyncio
-import sys
-import os
 import json
+import os
+import sys
 import time
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, List
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
-from do_app_sandbox import SandboxManager, PoolConfig
-from do_app_sandbox.exceptions import PoolExhaustedError, PoolShutdownError
+from do_app_sandbox import PoolConfig, SandboxManager
+from do_app_sandbox.exceptions import PoolExhaustedError
 
 
 @dataclass
 class TestCase:
     """Individual test case result."""
+
     name: str
     passed: bool
     duration_s: float = 0.0
     details: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class TestResult:
     """Overall test result."""
+
     test_name: str = "SandboxManager SDK"
     total_tests: int = 0
     passed: int = 0
     failed: int = 0
     duration_s: float = 0.0
-    test_cases: List[dict] = field(default_factory=list)
+    test_cases: list[dict] = field(default_factory=list)
     timestamp: str = ""
 
 
@@ -85,11 +86,7 @@ async def run_tests() -> TestResult:
     tc = TestCase(name="poolconfig_defaults", passed=False)
     try:
         config = PoolConfig()
-        tc.passed = (
-            config.max_ready == 10 and
-            config.target_ready == 0 and
-            config.on_empty == "create"
-        )
+        tc.passed = config.max_ready == 10 and config.target_ready == 0 and config.on_empty == "create"
         tc.details = f"max_ready={config.max_ready}, target_ready={config.target_ready}"
         tc.duration_s = 0.001
     except Exception as e:
@@ -108,10 +105,10 @@ async def run_tests() -> TestResult:
             idle_timeout=120,
         )
         tc.passed = (
-            config.max_ready == 5 and
-            config.target_ready == 2 and
-            config.on_empty == "fail" and
-            config.idle_timeout == 120
+            config.max_ready == 5
+            and config.target_ready == 2
+            and config.on_empty == "fail"
+            and config.idle_timeout == 120
         )
         tc.details = f"on_empty={config.on_empty}, idle_timeout={config.idle_timeout}"
         tc.duration_s = 0.001
@@ -219,10 +216,12 @@ async def async_test_context_manager():
 
 async def async_test_metrics():
     """Test metrics collection."""
-    async with SandboxManager(pools={
-        "python": PoolConfig(target_ready=0),
-        "node": PoolConfig(target_ready=0),
-    }) as manager:
+    async with SandboxManager(
+        pools={
+            "python": PoolConfig(target_ready=0),
+            "node": PoolConfig(target_ready=0),
+        }
+    ) as manager:
         metrics = manager.metrics()
         assert "python" in metrics
         assert "node" in metrics
@@ -233,9 +232,11 @@ async def async_test_metrics():
 
 async def async_test_acquire_fail():
     """Test acquire with on_empty=fail."""
-    async with SandboxManager(pools={
-        "python": PoolConfig(target_ready=0, on_empty="fail"),
-    }) as manager:
+    async with SandboxManager(
+        pools={
+            "python": PoolConfig(target_ready=0, on_empty="fail"),
+        }
+    ) as manager:
         try:
             await manager.acquire(image="python")
             return "ERROR: Should have raised PoolExhaustedError"

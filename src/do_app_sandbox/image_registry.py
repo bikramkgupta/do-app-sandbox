@@ -4,7 +4,6 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from .types import ImageInfo, ValidationResult
 
@@ -14,7 +13,7 @@ class ImageRegistry:
 
     BUILT_IN_IMAGES = {"python", "node"}
 
-    def __init__(self, config_dir: Optional[str] = None):
+    def __init__(self, config_dir: str | None = None):
         """Initialize the image registry.
 
         Args:
@@ -31,14 +30,14 @@ class ImageRegistry:
         """Create config directory if it doesn't exist."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
-    def _load_registry(self) -> Dict:
+    def _load_registry(self) -> dict:
         """Load registry data from file."""
         if not self.registry_file.exists():
             return {"images": {}}
-        with open(self.registry_file, "r") as f:
+        with open(self.registry_file) as f:
             return json.load(f)
 
-    def _save_registry(self, data: Dict) -> None:
+    def _save_registry(self, data: dict) -> None:
         """Save registry data to file."""
         with open(self.registry_file, "w") as f:
             json.dump(data, f, indent=2)
@@ -48,7 +47,7 @@ class ImageRegistry:
         name: str,
         dockerfile_path: str,
         registry: str,
-        validation_log: Optional[str] = None,
+        validation_log: str | None = None,
     ) -> ImageInfo:
         """Register a new custom image for validation.
 
@@ -97,7 +96,7 @@ class ImageRegistry:
 
         return self._dict_to_image_info(name, image_data)
 
-    def get_image(self, name: str) -> Optional[ImageInfo]:
+    def get_image(self, name: str) -> ImageInfo | None:
         """Get information about a registered image.
 
         Args:
@@ -123,7 +122,7 @@ class ImageRegistry:
 
         return self._dict_to_image_info(name, registry_data["images"][name])
 
-    def list_images(self) -> List[ImageInfo]:
+    def list_images(self) -> list[ImageInfo]:
         """List all registered images including built-ins.
 
         Returns:
@@ -179,9 +178,9 @@ class ImageRegistry:
         self,
         name: str,
         status: str,
-        validation_pid: Optional[int] = None,
-        validation_results: Optional[ValidationResult] = None,
-    ) -> Optional[ImageInfo]:
+        validation_pid: int | None = None,
+        validation_results: ValidationResult | None = None,
+    ) -> ImageInfo | None:
         """Update the status of a registered image.
 
         Args:
@@ -214,9 +213,7 @@ class ImageRegistry:
             }
 
         if status == "validated":
-            registry_data["images"][name]["validated_at"] = (
-                datetime.utcnow().isoformat() + "Z"
-            )
+            registry_data["images"][name]["validated_at"] = datetime.utcnow().isoformat() + "Z"
             registry_data["images"][name]["validation_pid"] = None
 
         self._save_registry(registry_data)
@@ -237,7 +234,7 @@ class ImageRegistry:
         image = self.get_image(name)
         return image is not None and image.status == "validated"
 
-    def get_image_url(self, name: str, registry: Optional[str] = None) -> Optional[str]:
+    def get_image_url(self, name: str, registry: str | None = None) -> str | None:
         """Get the Docker image URL for a registered image.
 
         Args:
@@ -258,7 +255,7 @@ class ImageRegistry:
 
         return image.image_url
 
-    def _dict_to_image_info(self, name: str, data: Dict) -> ImageInfo:
+    def _dict_to_image_info(self, name: str, data: dict) -> ImageInfo:
         """Convert registry dict to ImageInfo dataclass."""
         validation_results = None
         if data.get("validation_results"):

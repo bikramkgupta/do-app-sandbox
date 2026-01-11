@@ -6,8 +6,6 @@ import subprocess
 import sys
 import time
 import urllib.request
-from pathlib import Path
-from typing import Optional, Tuple
 
 from .image_registry import ImageRegistry
 from .types import ValidationResult
@@ -19,7 +17,7 @@ class ImageValidator:
     HEALTH_CHECK_TIMEOUT = 60  # seconds to wait for health check
     HEALTH_CHECK_INTERVAL = 2  # seconds between health check attempts
 
-    def __init__(self, registry: Optional[ImageRegistry] = None):
+    def __init__(self, registry: ImageRegistry | None = None):
         """Initialize the validator.
 
         Args:
@@ -27,7 +25,7 @@ class ImageValidator:
         """
         self.registry = registry or ImageRegistry()
 
-    def validate_dockerfile(self, dockerfile_path: str) -> Tuple[bool, ValidationResult]:
+    def validate_dockerfile(self, dockerfile_path: str) -> tuple[bool, ValidationResult]:
         """Parse and validate Dockerfile requirements.
 
         Args:
@@ -39,7 +37,7 @@ class ImageValidator:
         result = ValidationResult()
 
         try:
-            with open(dockerfile_path, "r") as f:
+            with open(dockerfile_path) as f:
                 content = f.read()
             result.dockerfile_parsed = True
         except Exception as e:
@@ -68,8 +66,8 @@ class ImageValidator:
         self,
         dockerfile_path: str,
         image_url: str,
-        log_file: Optional[str] = None,
-    ) -> Tuple[bool, str]:
+        log_file: str | None = None,
+    ) -> tuple[bool, str]:
         """Build Docker image from Dockerfile.
 
         Args:
@@ -113,7 +111,7 @@ class ImageValidator:
         except Exception as e:
             return False, f"Docker build error: {e}"
 
-    def push_image(self, image_url: str, log_file: Optional[str] = None) -> Tuple[bool, str]:
+    def push_image(self, image_url: str, log_file: str | None = None) -> tuple[bool, str]:
         """Push image to registry.
 
         Args:
@@ -156,8 +154,8 @@ class ImageValidator:
     def run_test_container(
         self,
         image_url: str,
-        log_file: Optional[str] = None,
-    ) -> Tuple[bool, str, Optional[str]]:
+        log_file: str | None = None,
+    ) -> tuple[bool, str, str | None]:
         """Run a test container and verify health endpoint.
 
         Args:
@@ -184,7 +182,7 @@ class ImageValidator:
         try:
             if log_file:
                 with open(log_file, "a") as f:
-                    f.write(f"\n=== Starting test container ===\n")
+                    f.write("\n=== Starting test container ===\n")
                     f.write(f"Command: {' '.join(cmd)}\n")
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -230,8 +228,8 @@ class ImageValidator:
     def check_health_endpoint(
         self,
         port: int = 18080,
-        log_file: Optional[str] = None,
-    ) -> Tuple[bool, str]:
+        log_file: str | None = None,
+    ) -> tuple[bool, str]:
         """Check if health endpoint responds.
 
         Args:
@@ -266,7 +264,7 @@ class ImageValidator:
 
         return False, f"Health endpoint did not respond within {self.HEALTH_CHECK_TIMEOUT}s"
 
-    def cleanup_container(self, container_id: str, log_file: Optional[str] = None) -> None:
+    def cleanup_container(self, container_id: str, log_file: str | None = None) -> None:
         """Stop and remove test container.
 
         Args:
@@ -317,9 +315,7 @@ class ImageValidator:
                 return result
 
             # Step 2: Build image
-            success, error = self.build_image(
-                image.dockerfile_path, image.image_url, log_file
-            )
+            success, error = self.build_image(image.dockerfile_path, image.image_url, log_file)
             if success:
                 result.image_built = True
             else:
@@ -335,9 +331,7 @@ class ImageValidator:
                 return result
 
             # Step 4: Run test container
-            success, error, container_id = self.run_test_container(
-                image.image_url, log_file
-            )
+            success, error, container_id = self.run_test_container(image.image_url, log_file)
             if success:
                 result.container_started = True
             else:
@@ -359,7 +353,7 @@ class ImageValidator:
 
             if log_file:
                 with open(log_file, "a") as f:
-                    f.write(f"\n=== Validation PASSED ===\n")
+                    f.write("\n=== Validation PASSED ===\n")
 
             return result
 
@@ -369,7 +363,7 @@ class ImageValidator:
                 self.cleanup_container(container_id, log_file)
 
 
-def run_validation(image_name: str, config_dir: Optional[str] = None) -> None:
+def run_validation(image_name: str, config_dir: str | None = None) -> None:
     """Entry point for background validation process.
 
     Args:

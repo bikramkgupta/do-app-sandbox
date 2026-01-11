@@ -28,21 +28,28 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Default values
 BUILD_PYTHON=true
 BUILD_NODE=true
+BUILD_SERVICE=true
 BUILD_LATEST=true
 DRY_RUN=false
+REGISTRY_HOST="ghcr.io"
+TAG_SUFFIX=""
 
 usage() {
     cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Build and push sandbox images to GitHub Container Registry.
+Build and push sandbox images to a container registry.
 
 Options:
-    --owner OWNER       GitHub username/org for GHCR (overrides GHCR_OWNER)
-    --user USER         GitHub username for login (overrides GHCR_USER)
-    --pat PAT           Personal Access Token (overrides GHCR_PAT)
+    --registry HOST     Registry host (default: ghcr.io)
+    --owner OWNER       Image owner/namespace (overrides GHCR_OWNER)
+    --user USER         Username for login (overrides GHCR_USER)
+    --pat PAT           Personal Access Token / Password (overrides GHCR_PAT)
+    --tag-suffix TAG    Use TAG for all images (e.g., 'temp', 'dev', 'test')
+                        Replaces version-specific tags with a single tag
     --python-only       Only build Python images
     --node-only         Only build Node images
+    --no-service        Skip building service/worker specialized images
     --no-latest         Skip building 'latest' tags
     --dry-run           Show what would be built without pushing
     -h, --help          Show this help message
@@ -58,6 +65,9 @@ Examples:
 
     # Build only Python images
     ./scripts/build-ghcr.sh --python-only
+
+    # Build with a test tag (all images get :temp tag)
+    ./scripts/build-ghcr.sh --tag-suffix temp
 
     # Dry run to see what would be built
     ./scripts/build-ghcr.sh --dry-run
@@ -87,7 +97,8 @@ load_env() {
         log_info "Loading environment from $env_file"
         # Export variables from .env, ignoring comments and empty lines
         set -a
-        source <(grep -v '^#' "$env_file" | grep -v '^$' | sed 's/^/export /')
+        # shellcheck disable=SC1090
+        source "$env_file"
         set +a
     fi
 }
@@ -96,6 +107,10 @@ load_env() {
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --registry)
+                REGISTRY_HOST="$2"
+                shift 2
+                ;;
             --owner)
                 GHCR_OWNER="$2"
                 shift 2
@@ -108,12 +123,22 @@ parse_args() {
                 GHCR_PAT="$2"
                 shift 2
                 ;;
+            --tag-suffix)
+                TAG_SUFFIX="$2"
+                shift 2
+                ;;
             --python-only)
                 BUILD_NODE=false
+                BUILD_SERVICE=false
                 shift
                 ;;
             --node-only)
                 BUILD_PYTHON=false
+                BUILD_SERVICE=false
+                shift
+                ;;
+            --no-service)
+                BUILD_SERVICE=false
                 shift
                 ;;
             --no-latest)
@@ -171,15 +196,15 @@ setup_buildx() {
     fi
 }
 
-# Login to GHCR
+# Login to registry
 docker_login() {
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "[DRY-RUN] Would login to ghcr.io as $GHCR_USER"
+        log_info "[DRY-RUN] Would login to $REGISTRY_HOST as $GHCR_USER"
         return
     fi
 
-    log_info "Logging in to ghcr.io as $GHCR_USER..."
-    echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+    log_info "Logging in to $REGISTRY_HOST as $GHCR_USER..."
+    echo "$GHCR_PAT" | docker login "$REGISTRY_HOST" -u "$GHCR_USER" --password-stdin
 }
 
 # Build and push a single image
@@ -188,7 +213,7 @@ build_image() {
     local tag="$2"
     local context="$3"
 
-    local full_tag="ghcr.io/$GHCR_OWNER/$tag"
+    local full_tag="$REGISTRY_HOST/$GHCR_OWNER/$tag"
 
     echo ""
     log_info "Building: $full_tag"
@@ -216,10 +241,14 @@ build_all() {
 
     echo ""
     echo "=========================================="
-    echo "  Building Sandbox Images for GHCR"
+    echo "  Building Sandbox Images"
     echo "=========================================="
-    echo "  Owner: $GHCR_OWNER"
-    echo "  User:  $GHCR_USER"
+    echo "  Registry: $REGISTRY_HOST"
+    echo "  Owner:    $GHCR_OWNER"
+    echo "  User:     $GHCR_USER"
+    if [[ -n "$TAG_SUFFIX" ]]; then
+        echo "  Tag:      $TAG_SUFFIX (all images)"
+    fi
     echo "=========================================="
     echo ""
 
@@ -227,21 +256,30 @@ build_all() {
     if [[ "$BUILD_PYTHON" == "true" ]]; then
         log_info "Building Python images..."
 
-        build_image \
-            "$images_dir/python/Dockerfile.python3.12" \
-            "sandbox-python:python3.12" \
-            "$images_dir/python/"
-
-        build_image \
-            "$images_dir/python/Dockerfile.python3.13" \
-            "sandbox-python:python3.13" \
-            "$images_dir/python/"
-
-        if [[ "$BUILD_LATEST" == "true" ]]; then
+        if [[ -n "$TAG_SUFFIX" ]]; then
+            # Build single image with custom tag
             build_image \
                 "$images_dir/python/Dockerfile" \
-                "sandbox-python:latest" \
+                "sandbox-python:$TAG_SUFFIX" \
                 "$images_dir/python/"
+        else
+            # Build version-specific images
+            build_image \
+                "$images_dir/python/Dockerfile.python3.12" \
+                "sandbox-python:python3.12" \
+                "$images_dir/python/"
+
+            build_image \
+                "$images_dir/python/Dockerfile.python3.13" \
+                "sandbox-python:python3.13" \
+                "$images_dir/python/"
+
+            if [[ "$BUILD_LATEST" == "true" ]]; then
+                build_image \
+                    "$images_dir/python/Dockerfile" \
+                    "sandbox-python:latest" \
+                    "$images_dir/python/"
+            fi
         fi
     fi
 
@@ -249,22 +287,62 @@ build_all() {
     if [[ "$BUILD_NODE" == "true" ]]; then
         log_info "Building Node images..."
 
-        build_image \
-            "$images_dir/node/Dockerfile.node22" \
-            "sandbox-node:node22" \
-            "$images_dir/node/"
-
-        build_image \
-            "$images_dir/node/Dockerfile.node24" \
-            "sandbox-node:node24" \
-            "$images_dir/node/"
-
-        if [[ "$BUILD_LATEST" == "true" ]]; then
+        if [[ -n "$TAG_SUFFIX" ]]; then
+            # Build single image with custom tag
             build_image \
                 "$images_dir/node/Dockerfile" \
-                "sandbox-node:latest" \
+                "sandbox-node:$TAG_SUFFIX" \
                 "$images_dir/node/"
+        else
+            # Build version-specific images
+            build_image \
+                "$images_dir/node/Dockerfile.node22" \
+                "sandbox-node:node22" \
+                "$images_dir/node/"
+
+            build_image \
+                "$images_dir/node/Dockerfile.node24" \
+                "sandbox-node:node24" \
+                "$images_dir/node/"
+
+            if [[ "$BUILD_LATEST" == "true" ]]; then
+                build_image \
+                    "$images_dir/node/Dockerfile" \
+                    "sandbox-node:latest" \
+                    "$images_dir/node/"
+            fi
         fi
+    fi
+
+    # Specialized Service/Worker images
+    if [[ "$BUILD_SERVICE" == "true" ]]; then
+        log_info "Building Specialized Service/Worker images..."
+
+        local svc_tag="${TAG_SUFFIX:-latest}"
+
+        # Python Service
+        build_image \
+            "$images_dir/sandbox-python-service/Dockerfile" \
+            "sandbox-python-service:$svc_tag" \
+            "$images_dir/"
+
+        # Python Worker
+        build_image \
+            "$images_dir/sandbox-python-worker/Dockerfile" \
+            "sandbox-python-worker:$svc_tag" \
+            "$images_dir/"
+
+        # Node Service
+        build_image \
+            "$images_dir/sandbox-node-service/Dockerfile" \
+            "sandbox-node-service:$svc_tag" \
+            "$images_dir/"
+
+        # Node Worker
+        build_image \
+            "$images_dir/sandbox-node-worker/Dockerfile" \
+            "sandbox-node-worker:$svc_tag" \
+            "$images_dir/"
     fi
 
     echo ""
@@ -272,20 +350,7 @@ build_all() {
     log_info "All builds complete!"
     echo "=========================================="
     echo ""
-    log_info "Images pushed to:"
-    if [[ "$BUILD_PYTHON" == "true" ]]; then
-        echo "  - ghcr.io/$GHCR_OWNER/sandbox-python:python3.12"
-        echo "  - ghcr.io/$GHCR_OWNER/sandbox-python:python3.13"
-        [[ "$BUILD_LATEST" == "true" ]] && echo "  - ghcr.io/$GHCR_OWNER/sandbox-python:latest"
-    fi
-    if [[ "$BUILD_NODE" == "true" ]]; then
-        echo "  - ghcr.io/$GHCR_OWNER/sandbox-node:node22"
-        echo "  - ghcr.io/$GHCR_OWNER/sandbox-node:node24"
-        [[ "$BUILD_LATEST" == "true" ]] && echo "  - ghcr.io/$GHCR_OWNER/sandbox-node:latest"
-    fi
-    echo ""
-    log_warn "Remember to make packages PUBLIC in GitHub:"
-    echo "  https://github.com/$GHCR_OWNER?tab=packages"
+    log_info "Images pushed to $REGISTRY_HOST/$GHCR_OWNER"
 }
 
 # Main

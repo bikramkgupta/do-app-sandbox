@@ -12,10 +12,10 @@ import json
 import os
 import tempfile
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from do_app_sandbox import Sandbox
 from do_app_sandbox.spaces import create_spaces_config_from_env
@@ -25,15 +25,15 @@ from do_app_sandbox.spaces import create_spaces_config_from_env
 class PerfCaseResult:
     name: str
     status: str  # success|error|skipped
-    metrics: Dict[str, Any]
-    error: Optional[str] = None
+    metrics: dict[str, Any]
+    error: str | None = None
 
 
 def time_create_delete(image: str, registry: str, region: str, spaces: bool) -> PerfCaseResult:
     spaces_config = create_spaces_config_from_env() if spaces else None
     name = f"perf-{image}-{int(time.time())}"
 
-    metrics: Dict[str, Any] = {}
+    metrics: dict[str, Any] = {}
     sandbox = None
     try:
         start = time.perf_counter()
@@ -65,11 +65,11 @@ def time_create_delete(image: str, registry: str, region: str, spaces: bool) -> 
                 metrics["delete_error"] = str(exc)
 
 
-def time_small_uploads(registry: str, region: str) -> List[PerfCaseResult]:
+def time_small_uploads(registry: str, region: str) -> list[PerfCaseResult]:
     """Measure small uploads over the console transport (websocket)."""
 
     sizes = [(1, 1 * 1024 * 1024), (4, 4 * 1024 * 1024)]  # MB, bytes
-    results: List[PerfCaseResult] = []
+    results: list[PerfCaseResult] = []
 
     sandbox = None
     try:
@@ -82,7 +82,7 @@ def time_small_uploads(registry: str, region: str) -> List[PerfCaseResult]:
         )
 
         for label, size_bytes in sizes:
-            metrics: Dict[str, Any] = {"size_mb": label}
+            metrics: dict[str, Any] = {"size_mb": label}
             try:
                 # Generate random content
                 fd, tmp_path_str = tempfile.mkstemp()
@@ -143,7 +143,7 @@ def run_large_file(registry: str, region: str, size_mb: int) -> PerfCaseResult:
         )
 
     sandbox = None
-    metrics: Dict[str, Any] = {"size_mb": size_mb}
+    metrics: dict[str, Any] = {"size_mb": size_mb}
     try:
         sandbox = Sandbox.create(
             registry=registry,
@@ -182,8 +182,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("tests/artifacts")
-        / f"perf-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json",
+        default=Path("tests/artifacts") / f"perf-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json",
     )
     parser.add_argument("--region", default=None, help="App Platform region (lower-case)")
     parser.add_argument("--images", nargs="+", default=["python", "node"], help="Images for lifecycle timing")
@@ -198,7 +197,7 @@ def main() -> None:
 
     region = (args.region or os.environ.get("APP_SANDBOX_REGION") or "nyc").lower()
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
     for image in args.images:
         results.append(asdict(time_create_delete(image, registry, region, spaces=args.spaces)))

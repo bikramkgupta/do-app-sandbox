@@ -8,7 +8,6 @@ import os
 import re
 import shlex
 import time
-from typing import Optional
 
 import pexpect
 
@@ -39,7 +38,7 @@ class Executor:
         """
         self.app_id = app_id
         self.component = component
-        self._child: Optional[pexpect.spawn] = None
+        self._child: pexpect.spawn | None = None
 
     def _get_doctl_command(self) -> str:
         """Build the doctl console command."""
@@ -158,8 +157,8 @@ class Executor:
     def _build_command(
         self,
         command: str,
-        env: Optional[dict[str, str]] = None,
-        cwd: Optional[str] = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
     ) -> str:
         """Build the full command with environment variables and working directory.
 
@@ -293,8 +292,8 @@ class Executor:
     def execute(
         self,
         command: str,
-        env: Optional[dict[str, str]] = None,
-        cwd: Optional[str] = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
         timeout: int = 120,
     ) -> CommandResult:
         """Execute a command on the remote container.
@@ -337,17 +336,13 @@ class Executor:
             return self._parse_output(raw_output, command)
 
         except pexpect.exceptions.TIMEOUT:
-            raise CommandTimeoutError(
-                f"Command timed out after {timeout} seconds: {command[:100]}..."
-            )
+            raise CommandTimeoutError(f"Command timed out after {timeout} seconds: {command[:100]}...")
         except pexpect.exceptions.EOF:
             # Try to capture partial output
             partial = ""
             if child and hasattr(child, "before") and child.before:
                 partial = child.before.decode("utf-8", errors="ignore")
-            raise CommandExecutionError(
-                f"Connection closed during command execution. Partial output: {partial[:200]}"
-            )
+            raise CommandExecutionError(f"Connection closed during command execution. Partial output: {partial[:200]}")
         except ConnectionError:
             raise
         except Exception as e:
