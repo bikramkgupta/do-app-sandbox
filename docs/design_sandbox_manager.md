@@ -140,7 +140,7 @@ Long-running agent workloads (e.g., Claude Code sandbox) where:
 
 ### 3.3 Pool States
 
-Each pool transitions between states based on activity:
+The pool always maintains `target_ready` sandboxes, preventing the create/delete oscillation pattern.
 
 ```
                          acquire()
@@ -148,17 +148,16 @@ Each pool transitions between states based on activity:
               ▼                            │
          ┌─────────┐    idle_timeout   ┌───┴─────┐
          │  IDLE   │ ◄──────────────── │  ACTIVE │
-         │(min_    │                   │ (target │
+         │(target  │                   │ (target │
          │ ready)  │                   │  ready) │
          └─────────┘                   └─────────┘
               │                             ▲
               │     acquire() triggers      │
-              │     scale-up                │
+              │     activity tracking       │
               └─────────────────────────────┘
 ```
 
-**Key:** When idle, pool maintains `min_ready` sandboxes (not 0). This prevents
-the create/delete oscillation pattern that occurs when pools scale to zero.
+**Key:** Both IDLE and ACTIVE states maintain `target_ready` sandboxes. The pool never scales below this value.
 
 ---
 
@@ -324,9 +323,8 @@ async def main():
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `max_ready` | int | 10 | Maximum sandboxes to keep warming in pool |
-| `target_ready` | int | 0 | Target number of ready sandboxes when pool is active |
-| `min_ready` | int | 0 | **Minimum sandboxes to maintain even when idle** (prevents oscillation) |
-| `idle_timeout` | int | 60 | Seconds of no acquires before scaling down |
+| `target_ready` | int | 0 | **Minimum sandboxes to always maintain** (prevents oscillation) |
+| `idle_timeout` | int | 60 | Seconds of no acquires before pool becomes idle |
 | `scale_down_delay` | int | 60 | Seconds between sandbox destructions during scale-down |
 | `cooldown_after_acquire` | int | 120 | Seconds to pause scale-down after an acquire |
 | `max_warm_age` | int | 1800 | Max seconds a sandbox can warm before being cycled out |
@@ -335,11 +333,7 @@ async def main():
 | `create_retries` | int | 3 | Number of retries for failed sandbox creation |
 | `create_retry_delay` | int | 5 | Seconds between creation retries |
 
-**Important:** `min_ready` vs `target_ready`:
-- `target_ready`: Pool size maintained only during active usage periods
-- `min_ready`: Guaranteed baseline maintained at all times, even when idle
-
-This prevents the create/delete oscillation pattern where pools scale to zero during idle periods.
+**Note:** `target_ready` is the minimum pool size that's always maintained. The pool will never scale below this value, preventing the create/delete oscillation pattern.
 
 ### 5.2 SandboxManager Parameters
 

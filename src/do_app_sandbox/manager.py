@@ -54,13 +54,11 @@ class PoolConfig:
 
     Attributes:
         max_ready: Maximum sandboxes to keep warming in pool (default: 10)
-        target_ready: Target number of ready sandboxes when pool is active (default: 0)
-        min_ready: Minimum sandboxes to maintain even when idle (default: 0).
-            Unlike target_ready which only applies when the pool is active,
-            min_ready ensures a baseline pool size is always maintained.
-            This prevents the create/delete oscillation pattern where pools
-            scale to zero during idle periods and then scale back up on acquire.
-        idle_timeout: Seconds of no acquires before scaling down (default: 60)
+        target_ready: Minimum number of ready sandboxes to maintain (default: 0).
+            The pool will always maintain at least this many sandboxes, preventing
+            the create/delete oscillation that occurs when pools scale to zero.
+            Set this to your desired pool size for consistent availability.
+        idle_timeout: Seconds of no acquires before pool becomes idle (default: 60)
         scale_down_delay: Seconds between sandbox destructions during scale-down (default: 60)
         cooldown_after_acquire: Seconds to pause scale-down after an acquire (default: 120)
         max_warm_age: Max seconds a sandbox can warm before being cycled out (default: 1800)
@@ -72,7 +70,6 @@ class PoolConfig:
 
     max_ready: int = 10
     target_ready: int = 0
-    min_ready: int = 0
     idle_timeout: int = 60
     scale_down_delay: int = 60
     cooldown_after_acquire: int = 120
@@ -89,14 +86,8 @@ class PoolConfig:
             raise ValueError(f"max_ready must be >= 0, got {self.max_ready}")
         if self.target_ready < 0:
             raise ValueError(f"target_ready must be >= 0, got {self.target_ready}")
-        if self.min_ready < 0:
-            raise ValueError(f"min_ready must be >= 0, got {self.min_ready}")
         if self.target_ready > self.max_ready:
             raise ValueError(f"target_ready ({self.target_ready}) cannot exceed max_ready ({self.max_ready})")
-        if self.min_ready > self.target_ready and self.target_ready > 0:
-            raise ValueError(f"min_ready ({self.min_ready}) cannot exceed target_ready ({self.target_ready}) when target_ready > 0")
-        if self.min_ready > self.max_ready:
-            raise ValueError(f"min_ready ({self.min_ready}) cannot exceed max_ready ({self.max_ready})")
 
 
 @dataclass
@@ -488,14 +479,9 @@ class SandboxPool:
         # Without the lock, the gap between reading _creating_count and spawning
         # tasks allows the next replenish cycle to see stale counts.
         async with self._lock:
-            # Check if we need to replenish
-            # When active: use target_ready (the desired pool size during activity)
-            # When inactive: use min_ready (the baseline to maintain even when idle)
-            # This prevents the oscillation bug where pools scale to 0 and back up
-            if self._is_active:
-                target = self.config.target_ready
-            else:
-                target = self.config.min_ready
+            # Always maintain target_ready sandboxes - this is the minimum pool size
+            # that prevents create/delete oscillation
+            target = self.config.target_ready
             current = self.ready_count + self._creating_count
 
             if current >= target:
@@ -530,17 +516,12 @@ class SandboxPool:
         """Check if we should scale down the pool.
 
         Scale-down logic:
-        1. Never scale below min_ready (the guaranteed baseline)
-        2. When inactive: scale down to min_ready (not to 0)
-        3. When active: respect cooldown, idle_timeout, and scale_down_delay
+        1. Never scale below target_ready (the guaranteed minimum)
+        2. Respect cooldown, idle_timeout, and scale_down_delay before scaling
         """
-        # CRITICAL: Never scale below min_ready to prevent oscillation
-        if self.ready_count <= self.config.min_ready:
+        # CRITICAL: Never scale below target_ready to prevent oscillation
+        if self.ready_count <= self.config.target_ready:
             return False
-
-        if not self._is_active:
-            # When inactive, scale down towards min_ready (not to 0)
-            return self.ready_count > self.config.min_ready
 
         if self._last_acquire_time is None:
             return False
@@ -563,12 +544,12 @@ class SandboxPool:
             if time_since_scale_down < self.config.scale_down_delay:
                 return False
 
-        return self.ready_count > self.config.min_ready
+        return self.ready_count > self.config.target_ready
 
     async def _scale_down_one(self) -> None:
         """Remove one sandbox from the pool."""
-        # Double-check we're above min_ready before destroying
-        if self.ready_count <= self.config.min_ready:
+        # Double-check we're above target_ready before destroying
+        if self.ready_count <= self.config.target_ready:
             return
 
         try:
@@ -578,10 +559,8 @@ class SandboxPool:
             self._metrics.scale_down_events += 1
             logger.debug(f"Scaled down pool for {self.image}, now {self.ready_count} ready")
 
-            # Deactivate pool when we've scaled down to min_ready
-            # Note: If min_ready > 0, pool stays at min_ready and can still be inactive
-            # If min_ready == 0, pool goes to 0 before deactivating (original behavior)
-            if self.ready_count <= self.config.min_ready:
+            # Mark pool as idle when we've scaled down to target_ready
+            if self.ready_count <= self.config.target_ready:
                 self._is_active = False
         except asyncio.QueueEmpty:
             pass
