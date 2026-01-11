@@ -3,6 +3,9 @@
 This test verifies that PTY file descriptors are properly released after
 command execution, preventing resource exhaustion in long-running applications.
 
+Uses shared_worker_sandbox fixture for efficiency.
+Run `make test-setup` first for fastest execution.
+
 GitHub Issue: https://github.com/bikramkgupta/do-app-sandbox/issues/6
 """
 
@@ -10,11 +13,7 @@ import os
 import subprocess
 import time
 
-from do_app_sandbox import Sandbox
-
-# Existing test sandbox - no creation needed
-TEST_APP_ID = "057623bb-7434-4706-bb76-af6834681f33"
-TEST_COMPONENT = "debug"
+import pytest
 
 # Number of iterations for leak test
 ITERATIONS = 50
@@ -45,7 +44,8 @@ def count_pty_fds(pid: int) -> int:
     return count
 
 
-def test_no_pty_leak_after_multiple_executions():
+@pytest.mark.integration
+def test_no_pty_leak_after_multiple_executions(shared_worker_sandbox):
     """Verify PTY file descriptors are released after command execution.
 
     This test:
@@ -57,13 +57,11 @@ def test_no_pty_leak_after_multiple_executions():
     If this test fails, it indicates a PTY file descriptor leak in the
     Executor._disconnect() method.
     """
+    sandbox = shared_worker_sandbox
     pid = os.getpid()
     baseline = count_pty_fds(pid)
     print(f"\nBaseline PTY FDs: {baseline}")
-
-    # Connect to existing test sandbox
-    sandbox = Sandbox.get_from_id(TEST_APP_ID, component=TEST_COMPONENT)
-    print(f"Connected to sandbox: {TEST_APP_ID}")
+    print(f"Using sandbox: {sandbox.app_id}")
 
     fd_counts = [baseline]
 
@@ -99,6 +97,7 @@ def test_no_pty_leak_after_multiple_executions():
 
 
 if __name__ == "__main__":
-    # Allow running directly for manual testing
-    test_no_pty_leak_after_multiple_executions()
-    print("\nTest passed!")
+    # For manual testing, run via pytest:
+    #   uv run pytest tests/integration/test_pty_leak.py -v -s
+    print("Run this test via pytest to use proper fixtures:")
+    print("  uv run pytest tests/integration/test_pty_leak.py -v -s")

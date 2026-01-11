@@ -98,7 +98,6 @@ from .types import (
     # Git
     GitCredentials,
     HibernatedSandbox,
-    HibernationConfig,
     ImageInfo,
     ProcessInfo,
     # Enums
@@ -139,7 +138,6 @@ __all__ = [
     "SandboxState",
     # Types - Configuration
     "ServiceConfig",
-    "HibernationConfig",
     # Types - Streaming
     "StreamEvent",
     # Types - Snapshots

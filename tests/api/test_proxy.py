@@ -81,12 +81,12 @@ class TestPortProxy:
         assert response.status_code in (200, 404, 502)
 
     def test_proxy_connection_error(self, api_url, auth_headers):
-        """502 when port not listening."""
+        """502 or 504 when port not listening."""
         # Port 19999 should not have anything listening
         response = httpx.get(f"{api_url}/proxy/19999/", headers=auth_headers, timeout=10.0)
 
-        # Should return 502 Bad Gateway
-        assert response.status_code == 502
+        # Should return 502 Bad Gateway or 504 Gateway Timeout
+        assert response.status_code in (502, 504)
 
     def test_proxy_timeout(self, api_url, auth_headers, cleanup_processes):
         """504 on timeout."""

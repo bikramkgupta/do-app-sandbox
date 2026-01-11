@@ -8,7 +8,6 @@ from do_app_sandbox.types import (
     FileInfo,
     GitCredentials,
     HibernatedSandbox,
-    HibernationConfig,
     ProcessInfo,
     SandboxMode,
     SandboxState,
@@ -95,29 +94,6 @@ class TestServiceConfig:
         repr_str = repr(config)
         assert "ServiceConfig" in repr_str
         assert "8080" in repr_str
-
-
-class TestHibernationConfig:
-    """Tests for HibernationConfig dataclass."""
-
-    def test_hibernation_config_defaults(self):
-        """HibernationConfig has correct defaults (enabled=True, sleep_after=600)."""
-        config = HibernationConfig()
-        assert config.enabled is True
-        assert config.sleep_after == 600  # 10 minutes
-
-    def test_hibernation_config_custom_values(self):
-        """HibernationConfig accepts custom values."""
-        config = HibernationConfig(enabled=False, sleep_after=300)
-        assert config.enabled is False
-        assert config.sleep_after == 300
-
-    def test_hibernation_config_repr(self):
-        """HibernationConfig repr shows enabled and sleep_after."""
-        config = HibernationConfig(enabled=True, sleep_after=600)
-        repr_str = repr(config)
-        assert "HibernationConfig" in repr_str
-        assert "600" in repr_str
 
 
 class TestStreamEvent:

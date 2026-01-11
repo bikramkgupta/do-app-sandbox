@@ -10,7 +10,6 @@ Fast tests with mocks that don't require real DO credentials.
 | `test_sandbox_state_enum` | Verify SandboxState enum values |
 | `test_service_config_defaults` | ServiceConfig has correct defaults |
 | `test_service_config_custom` | ServiceConfig accepts custom values |
-| `test_hibernation_config_defaults` | HibernationConfig defaults (enabled=True, sleep_after=600) |
 | `test_stream_event_creation` | StreamEvent dataclass creation |
 | `test_snapshot_metadata_creation` | SnapshotMetadata with all fields |
 | `test_hibernated_sandbox_creation` | HibernatedSandbox stores mode, config, metadata |
@@ -49,9 +48,6 @@ Fast tests with mocks that don't require real DO credentials.
 | Test | Description |
 |------|-------------|
 | `test_initial_state_active` | New sandbox starts in ACTIVE state |
-| `test_activity_tracking` | _record_activity() updates timestamp |
-| `test_idle_detection_no_streams` | _is_idle() returns True after sleep_after |
-| `test_idle_detection_with_streams` | _is_idle() returns False with active streams |
 | `test_ensure_awake_active` | _ensure_awake() passes for ACTIVE |
 | `test_ensure_awake_hibernated` | _ensure_awake() raises for HIBERNATED |
 | `test_mode_property` | mode property returns correct value |

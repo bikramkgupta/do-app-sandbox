@@ -4,7 +4,39 @@ This directory contains a comprehensive suite of tests for the `do-app-sandbox` 
 
 > **For AI Assistants**: See [CLAUDE.md](./CLAUDE.md) for detailed guidance on writing and running tests.
 
-## Quick Start
+## Quick Start with Makefile (Recommended)
+
+The Makefile provides a streamlined workflow using shared sandboxes.
+**Run from the tests/ directory:**
+
+```bash
+cd tests  # Important: run from tests/ directory
+
+# Start a test session (creates shared sandboxes, ~3 min)
+make test-setup
+
+# Run tests (fast - uses shared sandboxes)
+make test-git            # Git checkout tests
+make test-service        # Service mode tests
+make test-api            # API tests
+make test-integration    # All integration tests
+
+# End session (cleanup)
+make test-teardown
+
+# See all available targets
+make help
+```
+
+### CI Pipelines
+
+```bash
+make ci-test          # Full: setup → all tests → teardown
+make ci-integration   # Integration: setup → integration → teardown
+make ci-quick         # Quick: setup → unit + smoke → teardown
+```
+
+## Quick Start (Manual)
 
 ```bash
 # Run fast unit tests (no cloud required)
@@ -31,6 +63,20 @@ uv run pytest tests/integration/ -v
 | `benchmarks/` | ~30min | Yes | Performance measurement |
 | `perf/` | ~15min | Yes | Lifecycle & file transfer timing |
 | `smoke/` | ~2min | Yes | Quick sanity checks |
+
+### What Each Category Tests
+
+- **unit/**: Tests internal logic in isolation using mocks. No network, no cloud resources. Validates code correctness.
+
+- **api/**: Tests HTTP endpoints of the FastAPI server running inside service-mode containers. Validates request/response contracts: exec, streaming, sessions, files, background processes, port proxy.
+
+- **integration/**: Tests SDK features against real DigitalOcean infrastructure with actual sandbox deployments. Validates that components work together: service mode, snapshots, hibernation, pools, git.
+
+- **functional/**: Tests complete user workflows that span multiple SDK features in sequence. Validates real-world scenarios: create sandbox → install deps → run code → transfer files → cleanup.
+
+- **stress/**: Tests system behavior under sustained load over extended periods. Validates capacity limits, resource cleanup, and stability.
+
+- **modeling/**: Pure algorithmic simulation for pool sizing and scaling parameters. No cloud resources—answers "what pool size for 95% hit rate?"
 
 ## Incremental Testing Strategy
 
@@ -65,13 +111,33 @@ docker stop sandbox-api-test && docker rm sandbox-api-test
 ```
 
 **Option B: Cloud Sandbox**
-```bash
-sandbox create --image python --component-type service
-# Note the URL and token
 
-SANDBOX_API_URL=https://your-sandbox.ondigitalocean.app \
-SANDBOX_API_TOKEN=your-token \
-  uv run pytest tests/api/ -v
+Requires the `sandbox-python-service:latest` image to exist in your registry. Build and push first if needed:
+```bash
+# Build and push all images including service images (one-time setup)
+./scripts/build-ghcr.sh
+
+# Or with a custom tag (set APP_SANDBOX_PYTHON_TAG=temp when creating sandbox):
+./scripts/build-ghcr.sh --tag-suffix temp
+```
+
+Then create the sandbox and run tests:
+```bash
+# Create a service-mode sandbox and export variables
+# Note: Set APP_SANDBOX_PYTHON_TAG if using a custom tag (e.g., "temp" instead of "latest")
+eval $(APP_SANDBOX_PYTHON_TAG=temp uv run python -c "
+from do_app_sandbox import Sandbox, SandboxMode
+sandbox = Sandbox.create(image='python', mode=SandboxMode.SERVICE)
+print(f'export SANDBOX_API_URL={sandbox.get_url()}')
+print(f'export SANDBOX_API_TOKEN={sandbox._service_token}')
+print(f'export SANDBOX_APP_ID={sandbox.app_id}')
+")
+
+# Run the tests (must be in same shell session)
+uv run pytest tests/api/ -v
+
+# Delete the sandbox when done
+uv run python -c "from do_app_sandbox import Sandbox; Sandbox.get_from_id('$SANDBOX_APP_ID').delete()"
 ```
 
 ### Step 3: Integration & Functional Tests

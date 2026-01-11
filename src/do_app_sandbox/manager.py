@@ -237,13 +237,12 @@ class SandboxPool:
             except asyncio.CancelledError:
                 pass
 
-        # Cancel in-flight creation tasks and wait for them to complete
-        # This ensures we don't wait indefinitely for long-running sandbox creations
+        # Wait for in-flight creation tasks to complete (don't cancel them!)
+        # Cancelling would interrupt the await but the thread continues creating
+        # sandboxes that would then be orphaned. By waiting, the tasks complete
+        # and see _shutdown=True, destroying any just-created sandboxes.
         if self._creation_tasks:
-            logger.debug(f"Cancelling {len(self._creation_tasks)} in-flight creation tasks")
-            for task in self._creation_tasks:
-                task.cancel()
-            # Wait for cancellation to complete - return_exceptions captures CancelledError
+            logger.debug(f"Waiting for {len(self._creation_tasks)} in-flight creation tasks to complete")
             await asyncio.gather(*self._creation_tasks, return_exceptions=True)
 
         # Destroy all pooled sandboxes (any that slipped through before shutdown flag was set)
@@ -395,14 +394,13 @@ class SandboxPool:
                 last_error = e
                 self._metrics.failed_creates += 1
                 logger.warning(
-                    f"Sandbox creation attempt {attempt + 1}/{self.config.create_retries} "
-                    f"failed for {self.image}: {e}"
+                    f"Sandbox creation attempt {attempt + 1}/{self.config.create_retries} failed for {self.image}: {e}"
                 )
                 if attempt < self.config.create_retries - 1:
                     await asyncio.sleep(self.config.create_retry_delay)
 
         raise SandboxCreationError(
-            f"Failed to create sandbox for {self.image} after " f"{self.config.create_retries} attempts: {last_error}"
+            f"Failed to create sandbox for {self.image} after {self.config.create_retries} attempts: {last_error}"
         )
 
     async def _create_sandbox_no_counter(self, timeout: float | None = None) -> Sandbox:
@@ -438,14 +436,13 @@ class SandboxPool:
                 last_error = e
                 self._metrics.failed_creates += 1
                 logger.warning(
-                    f"Sandbox creation attempt {attempt + 1}/{self.config.create_retries} "
-                    f"failed for {self.image}: {e}"
+                    f"Sandbox creation attempt {attempt + 1}/{self.config.create_retries} failed for {self.image}: {e}"
                 )
                 if attempt < self.config.create_retries - 1:
                     await asyncio.sleep(self.config.create_retry_delay)
 
         raise SandboxCreationError(
-            f"Failed to create sandbox for {self.image} after " f"{self.config.create_retries} attempts: {last_error}"
+            f"Failed to create sandbox for {self.image} after {self.config.create_retries} attempts: {last_error}"
         )
 
     async def _destroy_sandbox(self, sandbox: Sandbox) -> None:
@@ -1086,3 +1083,82 @@ class SandboxManager:
         except RuntimeError:
             # No running loop - we can use asyncio.run directly
             return asyncio.run(self.acquire(image, timeout=timeout))
+
+    def acquire_with_snapshot_sync(self, image: str, snapshot_id: str, timeout: float = 300) -> Sandbox:
+        """Synchronous version of acquire_with_snapshot.
+
+        Args:
+            image: The image identifier
+            snapshot_id: ID of snapshot to restore
+            timeout: Maximum time to wait
+
+        Returns:
+            A Sandbox with the snapshot restored
+        """
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self.acquire_with_snapshot(image, snapshot_id, timeout=timeout),
+                )
+                return future.result(timeout=timeout)
+        except RuntimeError:
+            return asyncio.run(self.acquire_with_snapshot(image, snapshot_id, timeout=timeout))
+
+    def wake_hibernated_sync(self, hibernated: "HibernatedSandbox", timeout: float = 300) -> Sandbox:
+        """Synchronous version of wake_hibernated.
+
+        Args:
+            hibernated: HibernatedSandbox reference
+            timeout: Maximum time to wait
+
+        Returns:
+            A new Sandbox with hibernated state restored
+        """
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self.wake_hibernated(hibernated, timeout=timeout))
+                return future.result(timeout=timeout)
+        except RuntimeError:
+            return asyncio.run(self.wake_hibernated(hibernated, timeout=timeout))
+
+    def shutdown_sync(self, timeout: float = 30.0, wait_for_active: bool = False) -> None:
+        """Synchronous version of shutdown.
+
+        Args:
+            timeout: Maximum time to wait for graceful shutdown
+            wait_for_active: If True, wait for active sandboxes to be released
+        """
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self.shutdown(timeout=timeout, wait_for_active=wait_for_active),
+                )
+                future.result(timeout=timeout + 5)
+        except RuntimeError:
+            asyncio.run(self.shutdown(timeout=timeout, wait_for_active=wait_for_active))
+
+    def start_sync(self) -> None:
+        """Synchronous version of start.
+
+        Starts the manager and pool background tasks.
+        """
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self.start())
+                future.result(timeout=60)
+        except RuntimeError:
+            asyncio.run(self.start())

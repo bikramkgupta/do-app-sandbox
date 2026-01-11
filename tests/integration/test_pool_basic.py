@@ -17,6 +17,8 @@ Or directly:
 import asyncio
 import time
 
+import pytest
+
 from do_app_sandbox import PoolConfig, Sandbox, SandboxManager
 
 # Configuration
@@ -62,7 +64,9 @@ def print_metrics(manager: SandboxManager, image: str) -> None:
             print(f"     - Avg Acquire Latency: {metrics.avg_acquire_latency_ms:.1f}ms")
 
 
-async def test_pool_prewarm_and_replenish() -> None:
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_pool_prewarm_and_replenish(cleanup_sandboxes) -> None:
     """
     Integration test for pool pre-warming and automatic replenishment.
 
@@ -124,6 +128,7 @@ async def test_pool_prewarm_and_replenish() -> None:
 
             first_batch.append(sandbox)
             sandboxes.append(sandbox)
+            cleanup_sandboxes(sandbox)  # Register for cleanup on test failure/interrupt
 
         print_metrics(manager, IMAGE)
 
@@ -163,6 +168,7 @@ async def test_pool_prewarm_and_replenish() -> None:
 
             second_batch.append(sandbox)
             sandboxes.append(sandbox)
+            cleanup_sandboxes(sandbox)  # Register for cleanup on test failure/interrupt
 
         print_metrics(manager, IMAGE)
 
