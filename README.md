@@ -2,12 +2,9 @@
 
 > **Experimental**: This is a personal project and is not officially supported by DigitalOcean. APIs may change without notice.
 
-This is part of 3 projects to scale Agentic workflows with DigitalOcean App Platform. The concepts are generic and should work with any PaaS:
-- Safe local sandboxing using DevContainers ([do-app-devcontainer](https://github.com/bikramkgupta/do-app-devcontainer))
-- Rapid development iteration using hot reload ([do-app-hot-reload-template](https://github.com/bikramkgupta/do-app-hot-reload-template))
-- Disposable environments using sandboxes for parallel experimentation and debugging (this repo or [do-app-sandbox](https://github.com/bikramkgupta/do-app-sandbox))
-
 A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platform, similar to Cloudflare Sandbox.
+
+> **For AI Assistants**: See [do-app-platform-skills](https://github.com/bikramkgupta/do-app-platform-skills) for comprehensive App Platform guidance including deployment, troubleshooting, and this sandbox SDK.
 
 ## Features
 
@@ -22,9 +19,27 @@ A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platfo
 - **Troubleshoot existing apps**: Connect to any App Platform app for troubleshooting ([guide](docs/troubleshooting_existing_apps.md))
 
 ## Documentation
+- **Service Mode** (streaming, port exposure, sessions): [`docs/service_mode.md`](docs/service_mode.md)
 - **SandboxManager** (pre-warmed pools): [`docs/sandbox_manager.md`](docs/sandbox_manager.md)
 - Reference tables for SDK and CLI parameters/outputs: [`docs/sandbox_reference.md`](docs/sandbox_reference.md)
 - Troubleshooting existing App Platform apps: [`docs/troubleshooting_existing_apps.md`](docs/troubleshooting_existing_apps.md)
+
+## Getting Started
+
+Install from [PyPI](https://pypi.org/project/do-app-sandbox/):
+
+```bash
+# Using pip
+pip install do-app-sandbox
+
+# Using uv
+uv add do-app-sandbox
+
+# Or as a CLI tool
+uvx do-app-sandbox --help
+```
+
+> **For AI Assistants**: Use `do-app-sandbox` to deploy and test code in isolated cloud containers.
 
 ## Two Ways to Use This Package
 
@@ -140,39 +155,6 @@ app.filesystem.write_file("/tmp/debug-flag.txt", "enabled")
 
 For more details, see the [Troubleshooting Existing Apps Guide](docs/troubleshooting_existing_apps.md).
 
-## Installation
-
-### From PyPI (when published)
-
-```bash
-pip install do-app-sandbox
-```
-
-### From Source (with uv)
-
-```bash
-# Clone the repository
-cd do-app-sandbox
-
-# Development/editable install (recommended)
-uv pip install -e .
-
-# Regular install
-uv pip install .
-
-# With Spaces support for large file transfers
-uv pip install -e ".[spaces]"
-```
-
-### Run Without Installing
-
-```bash
-# Run CLI directly with uv
-uv sync
-uv run python -m do_app_sandbox --help
-uv run python -m do_app_sandbox list
-```
-
 ## Quick Start
 
 ### Prerequisites
@@ -282,6 +264,32 @@ async def main():
 - OpenTelemetry metrics for observability
 
 See [`docs/sandbox_manager.md`](docs/sandbox_manager.md) for full documentation.
+
+### Service Mode (Streaming & Port Exposure)
+
+Service mode provides an HTTP API with real-time streaming, port exposure, and persistent sessions:
+
+```python
+from do_app_sandbox import Sandbox, SandboxMode
+
+# Create a service-mode sandbox
+sandbox = Sandbox.create(image="python", mode=SandboxMode.SERVICE)
+
+# Stream command output in real-time
+for event in sandbox.exec_stream("pip install numpy pandas"):
+    if event.type == "stdout":
+        print(event.data, end="", flush=True)
+    elif event.type == "exit":
+        print(f"\nDone with exit code: {event.data}")
+
+# Expose internal ports through public URL
+sandbox.exec("python -m http.server 3000 &")
+port_info = sandbox.expose_port(3000)
+print(f"Access at: {port_info.url}")
+# https://sandbox-xxx.ondigitalocean.app/proxy/3000
+```
+
+See [`docs/service_mode.md`](docs/service_mode.md) for sessions, log streaming, and HTTP API reference.
 
 ## CLI Reference
 
@@ -427,15 +435,6 @@ sandbox.exec("cd /home/sandbox && unzip -o app.zip -d app && rm app.zip")
 | Quick config change | Single file upload |
 | Hot-reload during development | Single file upload |
 | Replacing entire codebase | Zip and upload once |
-
-## Log Streaming
-
-Use `doctl` directly for build/run logs:
-
-```bash
-doctl apps logs -f <APP_ID> sandbox --type run
-doctl apps logs -f <APP_ID> sandbox --type build
-```
 
 ## Smoke & Perf Harness
 
