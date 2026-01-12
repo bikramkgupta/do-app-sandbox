@@ -1,6 +1,6 @@
 [project]
 name = "do-app-sandbox"
-version = "0.2.0"
+version = "0.2.1"
 description = "Experimental sandbox API for DigitalOcean App Platform - provides sandbox-like capabilities similar to Cloudflare Sandbox"
 readme = "README.md"
 license = {text = "MIT"}
