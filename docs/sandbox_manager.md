@@ -48,8 +48,8 @@ async with SandboxManager(pools={"python": PoolConfig(target_ready=3)}) as manag
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `max_ready` | 10 | Maximum sandboxes to keep warming in pool |
-| `target_ready` | 0 | Target number of ready sandboxes when active |
-| `idle_timeout` | 60 | Seconds of no acquires before scaling down |
+| `target_ready` | 0 | **Minimum sandboxes to always maintain** (prevents oscillation) |
+| `idle_timeout` | 60 | Seconds of no acquires before pool becomes idle |
 | `scale_down_delay` | 60 | Seconds between destructions during scale-down |
 | `cooldown_after_acquire` | 120 | Seconds to pause scale-down after an acquire |
 | `max_warm_age` | 1800 | Max seconds a sandbox can warm before cycling out |
@@ -57,6 +57,8 @@ async with SandboxManager(pools={"python": PoolConfig(target_ready=3)}) as manag
 | `on_empty` | `"create"` | Behavior when empty: `"create"` (fallback) or `"fail"` (fast-fail) |
 | `create_retries` | 3 | Retry attempts for failed sandbox creation |
 | `create_retry_delay` | 5 | Seconds between creation retries |
+
+**Note:** `target_ready` is the minimum pool size that's always maintained. The pool will never scale below this value.
 
 ### SandboxManager Parameters
 
@@ -70,20 +72,22 @@ async with SandboxManager(pools={"python": PoolConfig(target_ready=3)}) as manag
 
 ## Adaptive Scaling
 
-Pools automatically scale based on demand:
-
-```
-IDLE (0 warm) ←──── idle_timeout ──── ACTIVE (target_ready warm)
-      │                                        ↑
-      └──── acquire() triggers scale-up ───────┘
-```
+The pool maintains `target_ready` sandboxes at all times, preventing the create/delete oscillation that occurs when pools scale to zero.
 
 **Scale-down behavior:**
-1. No acquires for `idle_timeout` seconds → start scaling down
+1. No acquires for `cooldown_after_acquire` seconds → start scaling down
 2. Destroy 1 sandbox every `scale_down_delay` seconds
-3. After any acquire, pause scale-down for `cooldown_after_acquire` seconds
+3. **Stop at `target_ready`** - never scale below this value
+4. After any acquire, pause scale-down for `cooldown_after_acquire` seconds
 
-This prevents paying for idle sandboxes while avoiding thrashing.
+**Example:** Set `target_ready` to your desired pool size:
+
+```python
+PoolConfig(
+    target_ready=5,  # Always keep 5 sandboxes ready
+    max_ready=20,    # But never exceed 20
+)
+```
 
 ## Fallback vs Fail-Fast
 

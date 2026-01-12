@@ -54,8 +54,11 @@ class PoolConfig:
 
     Attributes:
         max_ready: Maximum sandboxes to keep warming in pool (default: 10)
-        target_ready: Target number of ready sandboxes when pool is active (default: 0)
-        idle_timeout: Seconds of no acquires before scaling down (default: 60)
+        target_ready: Minimum number of ready sandboxes to maintain (default: 0).
+            The pool will always maintain at least this many sandboxes, preventing
+            the create/delete oscillation that occurs when pools scale to zero.
+            Set this to your desired pool size for consistent availability.
+        idle_timeout: Seconds of no acquires before pool becomes idle (default: 60)
         scale_down_delay: Seconds between sandbox destructions during scale-down (default: 60)
         cooldown_after_acquire: Seconds to pause scale-down after an acquire (default: 120)
         max_warm_age: Max seconds a sandbox can warm before being cycled out (default: 1800)
@@ -476,8 +479,9 @@ class SandboxPool:
         # Without the lock, the gap between reading _creating_count and spawning
         # tasks allows the next replenish cycle to see stale counts.
         async with self._lock:
-            # Check if we need to replenish
-            target = self.config.target_ready if self._is_active else 0
+            # Always maintain target_ready sandboxes - this is the minimum pool size
+            # that prevents create/delete oscillation
+            target = self.config.target_ready
             current = self.ready_count + self._creating_count
 
             if current >= target:
@@ -509,33 +513,45 @@ class SandboxPool:
             self._metrics.scale_up_events += 1
 
     async def _should_scale_down(self) -> bool:
-        """Check if we should scale down the pool."""
-        if not self._is_active:
-            return self.ready_count > 0
+        """Check if we should scale down the pool.
+
+        Scale-down logic:
+        1. Never scale below target_ready (the guaranteed minimum)
+        2. Respect cooldown, idle_timeout, and scale_down_delay before scaling
+        """
+        # CRITICAL: Never scale below target_ready to prevent oscillation
+        if self.ready_count <= self.config.target_ready:
+            return False
 
         if self._last_acquire_time is None:
             return False
 
         time_since_acquire = time.time() - self._last_acquire_time
 
-        # Check cooldown
+        # Check cooldown - pause scale-down after recent acquire to handle bursts
         if time_since_acquire < self.config.cooldown_after_acquire:
             return False
 
-        # Check idle timeout
+        # Check idle timeout - only start scaling after sustained inactivity
+        # Note: With default settings (cooldown=120, idle=60), cooldown dominates.
+        # This check matters when cooldown < idle_timeout (e.g., cooldown=30, idle=60)
         if time_since_acquire < self.config.idle_timeout:
             return False
 
-        # Check scale down delay
+        # Check scale down delay - rate limit destructions
         if self._last_scale_down_time is not None:
             time_since_scale_down = time.time() - self._last_scale_down_time
             if time_since_scale_down < self.config.scale_down_delay:
                 return False
 
-        return self.ready_count > 0
+        return self.ready_count > self.config.target_ready
 
     async def _scale_down_one(self) -> None:
         """Remove one sandbox from the pool."""
+        # Double-check we're above target_ready before destroying
+        if self.ready_count <= self.config.target_ready:
+            return
+
         try:
             pooled = self._ready_queue.get_nowait()
             await self._destroy_sandbox(pooled.sandbox)
@@ -543,8 +559,8 @@ class SandboxPool:
             self._metrics.scale_down_events += 1
             logger.debug(f"Scaled down pool for {self.image}, now {self.ready_count} ready")
 
-            # Check if pool is now empty
-            if self.ready_count == 0:
+            # Mark pool as idle when we've scaled down to target_ready
+            if self.ready_count <= self.config.target_ready:
                 self._is_active = False
         except asyncio.QueueEmpty:
             pass
