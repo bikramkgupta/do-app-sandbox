@@ -215,6 +215,54 @@ class TestSandboxPool:
         assert pool.ready_count == 0
         assert pool._shutdown is True
 
+    @pytest.mark.asyncio
+    async def test_should_scale_down_respects_target_ready(self):
+        """Test that _should_scale_down respects target_ready threshold."""
+        config = PoolConfig(target_ready=2, max_ready=10)
+        semaphore = asyncio.Semaphore(10)
+        pool = SandboxPool(
+            image="test-image",
+            config=config,
+            sandbox_defaults={},
+            create_semaphore=semaphore,
+        )
+
+        # Add 2 sandboxes (at target_ready)
+        for _ in range(2):
+            mock = MagicMock()
+            mock.delete = MagicMock()
+            await pool._ready_queue.put(_PooledSandbox(sandbox=mock))
+
+        assert pool.ready_count == 2
+
+        # Should NOT scale down when at target_ready
+        should_scale = await pool._should_scale_down()
+        assert should_scale is False
+
+    @pytest.mark.asyncio
+    async def test_scale_down_one_stops_at_target_ready(self):
+        """Test that _scale_down_one stops when reaching target_ready."""
+        config = PoolConfig(target_ready=2, max_ready=10)
+        semaphore = asyncio.Semaphore(10)
+        pool = SandboxPool(
+            image="test-image",
+            config=config,
+            sandbox_defaults={},
+            create_semaphore=semaphore,
+        )
+
+        # Add exactly 2 sandboxes (at target_ready)
+        for _ in range(2):
+            mock = MagicMock()
+            mock.delete = MagicMock()
+            await pool._ready_queue.put(_PooledSandbox(sandbox=mock))
+
+        assert pool.ready_count == 2
+
+        # scale_down_one should not remove any sandbox
+        await pool._scale_down_one()
+        assert pool.ready_count == 2  # Still at target_ready
+
 
 class TestSandboxManager:
     """Tests for SandboxManager class."""
