@@ -191,9 +191,8 @@ manager = SandboxManager(
             scale_down_delay=60,       # Destroy 1 per minute when idle
             cooldown_after_acquire=120,# Pause scale-down 2 min after acquire
 
-            # Health (uses sandbox.is_ready() check)
+            # Health (lazy check during acquire)
             max_warm_age=1800,         # Cycle out after 30 min warming
-            health_check_interval=60,  # Check is_ready() every 60s
 
             # Behavior
             on_empty="create",         # "create" (fallback) | "fail" (fast-fail)
@@ -218,7 +217,7 @@ manager = SandboxManager(
 # Async API (primary)
 class SandboxManager:
     async def start(self) -> None:
-        """Start background workers (replenisher, health monitor, etc.)."""
+        """Start background workers (replenisher, etc.)."""
 
     async def acquire(
         self,
@@ -328,7 +327,6 @@ async def main():
 | `scale_down_delay` | int | 60 | Seconds between sandbox destructions during scale-down |
 | `cooldown_after_acquire` | int | 120 | Seconds to pause scale-down after an acquire |
 | `max_warm_age` | int | 1800 | Max seconds a sandbox can warm before being cycled out |
-| `health_check_interval` | int | 60 | Seconds between health checks (0 to disable) |
 | `on_empty` | str | "create" | Behavior when pool is empty: "create" or "fail" |
 | `create_retries` | int | 3 | Number of retries for failed sandbox creation |
 | `create_retry_delay` | int | 5 | Seconds between creation retries |
@@ -480,7 +478,8 @@ class SandboxPool:
 
 1. **Replenisher**: Runs per-pool, maintains `target_ready` count
 2. **Idle Monitor**: Runs globally, checks all pools for idle timeout
-3. **Health Monitor**: Runs per-pool, calls `sandbox.is_ready()` to validate health
+
+**Note:** Health checks are performed lazily during `acquire()` rather than periodically. This avoids unnecessary API calls and race conditions where periodic health checks could temporarily drain the pool.
 
 ### 8.4 Graceful Shutdown Sequence
 

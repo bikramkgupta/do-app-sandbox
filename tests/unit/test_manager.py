@@ -31,7 +31,6 @@ class TestPoolConfig:
         assert config.scale_down_delay == 60
         assert config.cooldown_after_acquire == 120
         assert config.max_warm_age == 1800
-        assert config.health_check_interval == 60
         assert config.on_empty == "create"
         assert config.create_retries == 3
         assert config.create_retry_delay == 5

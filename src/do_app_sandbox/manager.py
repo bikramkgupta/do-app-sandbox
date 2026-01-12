@@ -62,7 +62,6 @@ class PoolConfig:
         scale_down_delay: Seconds between sandbox destructions during scale-down (default: 60)
         cooldown_after_acquire: Seconds to pause scale-down after an acquire (default: 120)
         max_warm_age: Max seconds a sandbox can warm before being cycled out (default: 1800)
-        health_check_interval: Seconds between health checks, 0 to disable (default: 60)
         on_empty: Behavior when pool is empty: "create" or "fail" (default: "create")
         create_retries: Number of retries for failed sandbox creation (default: 3)
         create_retry_delay: Seconds between creation retries (default: 5)
@@ -74,7 +73,6 @@ class PoolConfig:
     scale_down_delay: int = 60
     cooldown_after_acquire: int = 120
     max_warm_age: int = 1800
-    health_check_interval: int = 60
     on_empty: str = "create"  # "create" or "fail"
     create_retries: int = 3
     create_retry_delay: int = 5
@@ -140,7 +138,8 @@ class SandboxPool:
     """Manages a pool of sandboxes for a single image.
 
     This class handles the lifecycle of sandboxes for one specific image,
-    including creation, pooling, health checks, and cleanup.
+    including creation, pooling, and cleanup. Health checks are performed
+    lazily during acquire() rather than periodically.
     """
 
     def __init__(
@@ -184,7 +183,6 @@ class SandboxPool:
 
         # Background tasks
         self._replenish_task: asyncio.Task | None = None
-        self._health_task: asyncio.Task | None = None
         self._creation_tasks: set[asyncio.Task] = set()  # Track in-flight creation tasks
 
     @property
@@ -218,8 +216,6 @@ class SandboxPool:
         self._shutdown = False
         self._is_active = True  # Start active so pool pre-warms immediately
         self._replenish_task = asyncio.create_task(self._replenish_loop())
-        if self.config.health_check_interval > 0:
-            self._health_task = asyncio.create_task(self._health_check_loop())
 
     async def stop(self) -> None:
         """Stop background tasks and clean up."""
@@ -230,13 +226,6 @@ class SandboxPool:
             self._replenish_task.cancel()
             try:
                 await self._replenish_task
-            except asyncio.CancelledError:
-                pass
-
-        if self._health_task:
-            self._health_task.cancel()
-            try:
-                await self._health_task
             except asyncio.CancelledError:
                 pass
 
@@ -631,54 +620,6 @@ class SandboxPool:
         finally:
             async with self._lock:
                 self._creating_count -= 1
-
-    async def _health_check_loop(self) -> None:
-        """Background task to check health of pooled sandboxes."""
-        while not self._shutdown:
-            try:
-                await asyncio.sleep(self.config.health_check_interval)
-                await self._health_check_once()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in health check loop for {self.image}: {e}")
-                await asyncio.sleep(5)
-
-    async def _health_check_once(self) -> None:
-        """Single health check pass."""
-        # Move all items to a temp list, check them, and re-add healthy ones
-        healthy: list[_PooledSandbox] = []
-        unhealthy_count = 0
-
-        while not self._ready_queue.empty():
-            try:
-                pooled = self._ready_queue.get_nowait()
-
-                # Check age
-                if pooled.age > self.config.max_warm_age:
-                    await self._destroy_sandbox(pooled.sandbox)
-                    unhealthy_count += 1
-                    continue
-
-                # Check health
-                is_ready = await asyncio.to_thread(pooled.sandbox.is_ready)
-                if not is_ready:
-                    await self._destroy_sandbox(pooled.sandbox)
-                    unhealthy_count += 1
-                    continue
-
-                healthy.append(pooled)
-            except asyncio.QueueEmpty:
-                break
-
-        # Re-add healthy sandboxes
-        for pooled in healthy:
-            await self._ready_queue.put(pooled)
-
-        if unhealthy_count > 0:
-            self._metrics.health_check_removals += unhealthy_count
-            logger.info(f"Health check removed {unhealthy_count} sandboxes from {self.image} pool")
-
 
 class SandboxManager:
     """Manager for pools of pre-warmed sandboxes.
