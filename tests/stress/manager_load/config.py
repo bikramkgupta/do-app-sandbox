@@ -63,7 +63,6 @@ class TestConfig:
     scale_down_delay: int = 60  # Delay between destructions
     cooldown_after_acquire: int = 180  # Pause replenishment after acquire
     max_warm_age: int = 1800  # Max time a sandbox stays warm (30 min)
-    health_check_interval: int = 60  # Health check frequency (0 to disable)
 
     # Sandbox defaults
     region: str = "syd1"
@@ -499,7 +498,6 @@ def get_corner_case_blitz() -> ScenarioConfig:
             scale_down_delay=5,  # 5s (very aggressive)
             cooldown_after_acquire=60,  # 1 min
             max_warm_age=300,  # 5 min (trigger cycling)
-            health_check_interval=10,  # 10s (very frequent - stress health checks)
         ),
         idle_periods=[
             (1800, 300),  # 5 min idle at 30 min
