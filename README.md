@@ -21,6 +21,7 @@ A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platfo
 ## Documentation
 - **Service Mode** (streaming, port exposure, sessions): [`docs/service_mode.md`](docs/service_mode.md)
 - **SandboxManager** (pre-warmed pools): [`docs/sandbox_manager.md`](docs/sandbox_manager.md)
+- **Tailscale SSH** (browser-based SSH access): [`docs/tailscale_ssh.md`](docs/tailscale_ssh.md)
 - Reference tables for SDK and CLI parameters/outputs: [`docs/sandbox_reference.md`](docs/sandbox_reference.md)
 - Troubleshooting existing App Platform apps: [`docs/troubleshooting_existing_apps.md`](docs/troubleshooting_existing_apps.md)
 
@@ -290,6 +291,36 @@ print(f"Access at: {port_info.url}")
 ```
 
 See [`docs/service_mode.md`](docs/service_mode.md) for sessions, log streaming, and HTTP API reference.
+
+### Tailscale SSH (Browser-Based SSH)
+
+SSH into containers via your browser - no VPN client needed on your laptop:
+
+```yaml
+# app.yaml for Tailscale-enabled sandbox
+services:
+  - name: sandbox
+    image:
+      registry_type: GHCR
+      registry: bikramkgupta
+      repository: sandbox-tailscale-python  # or sandbox-tailscale-node
+      tag: latest
+    envs:
+      - key: TS_AUTHKEY
+        value: "tskey-auth-xxxxx"  # From Tailscale admin
+        type: SECRET
+      - key: TS_HOSTNAME
+        value: "my-sandbox"
+```
+
+**Quick setup:**
+1. Create Tailscale account at [login.tailscale.com](https://login.tailscale.com)
+2. Generate auth key: **Settings** > **Keys** > **Generate auth key**
+3. Add SSH ACL: **Access Controls** > add `{"ssh": [{"action": "accept", "src": ["autogroup:admin"], "dst": ["*"], "users": ["sandbox"]}]}`
+4. Deploy container with `TS_AUTHKEY` environment variable
+5. SSH via browser: **Machines** > find your container > click **SSH**
+
+See [`docs/tailscale_ssh.md`](docs/tailscale_ssh.md) for full setup guide.
 
 ## CLI Reference
 
