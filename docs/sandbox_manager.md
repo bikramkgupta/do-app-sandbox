@@ -53,7 +53,6 @@ async with SandboxManager(pools={"python": PoolConfig(target_ready=3)}) as manag
 | `scale_down_delay` | 60 | Seconds between destructions during scale-down |
 | `cooldown_after_acquire` | 120 | Seconds to pause scale-down after an acquire |
 | `max_warm_age` | 1800 | Max seconds a sandbox can warm before cycling out |
-| `health_check_interval` | 60 | Seconds between health checks (0 to disable) |
 | `on_empty` | `"create"` | Behavior when empty: `"create"` (fallback) or `"fail"` (fast-fail) |
 | `create_retries` | 3 | Retry attempts for failed sandbox creation |
 | `create_retry_delay` | 5 | Seconds between creation retries |
@@ -147,11 +146,12 @@ exporter = OTLPMetricExporter(endpoint="https://otel.example.com:4317")
 
 ## Health Monitoring
 
-Pooled sandboxes are monitored for health:
+Sandbox health is checked lazily during `acquire()`:
 
-- **Periodic checks**: Calls `sandbox.is_ready()` every `health_check_interval` seconds
-- **Age limit**: Sandboxes older than `max_warm_age` are cycled out
-- **Automatic replacement**: Unhealthy sandboxes are destroyed and replenished
+- **On-acquire check**: Each sandbox is verified with `is_ready()` when acquired
+- **Age limit**: Sandboxes older than `max_warm_age` are rejected and destroyed
+- **Automatic skip**: Unhealthy sandboxes are destroyed and the next one is tried
+- **No periodic overhead**: Avoids unnecessary API calls and race conditions
 
 ## Error Handling
 

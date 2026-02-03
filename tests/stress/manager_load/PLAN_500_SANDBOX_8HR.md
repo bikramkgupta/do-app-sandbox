@@ -72,7 +72,6 @@ node/compute/buffer_churn.js          # Buffer alloc/dealloc
 ```python
 # Aggressive timing to trigger edge cases
 max_warm_age=300,           # 5 min instead of 30 min
-health_check_interval=15,   # Every 15s instead of 60s
 idle_timeout=60,            # Quick idle detection
 scale_down_delay=10,        # Fast scale-down
 ```
@@ -426,7 +425,6 @@ def get_corner_case_blitz() -> ScenarioConfig:
             scale_down_delay=5,         # 5s (very aggressive)
             cooldown_after_acquire=60,  # 1 min
             max_warm_age=300,           # 5 min (trigger cycling)
-            health_check_interval=10,   # 10s (very frequent)
         ),
         idle_periods=[
             (1800, 300),   # 5 min idle at 30 min
@@ -710,7 +708,6 @@ Based on implementation analysis, likely corner cases to discover:
 ```python
 # Tight timing (reveals race conditions)
 max_warm_age=300
-health_check_interval=10
 scale_down_delay=5
 
 # High scale (reveals resource limits)

@@ -51,3 +51,4 @@ logging.json
 # Claude Code logs
 .claude-logs/
 uv.lock
+

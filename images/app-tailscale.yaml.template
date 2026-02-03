@@ -1,0 +1,48 @@
+# App Platform Sandbox Spec Template - TAILSCALE SSH
+# This template is for deploying Tailscale-enabled sandbox containers.
+# Provides SSH access via Tailscale browser console (no VPN client needed).
+#
+# Prerequisites:
+#   1. Tailscale account: https://login.tailscale.com
+#   2. Auth key: Settings > Keys > Generate auth key
+#   3. SSH ACL configured (see docs/tailscale_ssh.md)
+#
+# Variables:
+#   {sandbox_name} - Name of the sandbox application
+#   {registry_type} - Registry type: "GHCR" (GitHub) or "DOCR" (DigitalOcean)
+#   {registry} - Registry name (e.g., "bikramkgupta" for GHCR)
+#   {repository} - Image repository name (sandbox-tailscale-python or sandbox-tailscale-node)
+#   {tag} - Image tag (e.g., latest)
+#   {region} - App Platform region (default: atl1)
+#   {instance_size} - Instance size slug (default: apps-s-1vcpu-1gb)
+#   {ts_authkey} - Tailscale auth key (tskey-auth-...)
+#   {ts_hostname} - Tailscale hostname (optional, auto-generated if not set)
+
+name: {sandbox_name}
+region: {region}
+services:
+  - name: sandbox
+    image:
+      registry_type: {registry_type}
+      registry: {registry}
+      repository: {repository}
+      tag: {tag}
+    instance_count: 1
+    instance_size_slug: {instance_size}
+    http_port: 8080
+    internal_ports:
+      - 9090
+    health_check:
+      http_path: /sandbox_health
+      port: 9090
+      initial_delay_seconds: 30
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: TS_AUTHKEY
+        value: "{ts_authkey}"
+        type: SECRET
+      - key: TS_HOSTNAME
+        value: "{ts_hostname}"

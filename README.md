@@ -21,6 +21,7 @@ A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platfo
 ## Documentation
 - **Service Mode** (streaming, port exposure, sessions): [`docs/service_mode.md`](docs/service_mode.md)
 - **SandboxManager** (pre-warmed pools): [`docs/sandbox_manager.md`](docs/sandbox_manager.md)
+- **Tailscale SSH** (browser-based SSH access): [`docs/tailscale_ssh.md`](docs/tailscale_ssh.md)
 - Reference tables for SDK and CLI parameters/outputs: [`docs/sandbox_reference.md`](docs/sandbox_reference.md)
 - Troubleshooting existing App Platform apps: [`docs/troubleshooting_existing_apps.md`](docs/troubleshooting_existing_apps.md)
 
@@ -290,6 +291,32 @@ print(f"Access at: {port_info.url}")
 ```
 
 See [`docs/service_mode.md`](docs/service_mode.md) for sessions, log streaming, and HTTP API reference.
+
+### Tailscale SSH (Terminal SSH Access)
+
+SSH into containers from your terminal via Tailscale's private network. Enables SSH tunneling, VS Code Remote, scp/rsync, and more.
+
+```bash
+# One-time setup: install Tailscale on your laptop
+brew install tailscale  # macOS
+tailscale up            # authenticate
+
+# SSH into your container
+ssh sandbox@100.64.1.2
+
+# Port forwarding for local development
+ssh -L 3000:localhost:3000 sandbox@100.64.1.2
+```
+
+**Quick setup:**
+1. Install Tailscale on laptop: [tailscale.com/download](https://tailscale.com/download)
+2. Create account & authenticate: `tailscale up`
+3. Generate auth key: **Settings** > **Keys** > **Generate auth key**
+4. Add SSH ACL: `{"ssh": [{"action": "accept", "src": ["autogroup:member"], "dst": ["*"], "users": ["sandbox"]}]}`
+5. Deploy container with `TS_AUTHKEY` env var
+6. Find IP: `tailscale status` → SSH: `ssh sandbox@<ip>`
+
+See [`docs/tailscale_ssh.md`](docs/tailscale_ssh.md) for full setup guide with VS Code Remote, port forwarding examples, and troubleshooting.
 
 ## CLI Reference
 
