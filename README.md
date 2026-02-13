@@ -4,7 +4,7 @@
 
 A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platform, similar to Cloudflare Sandbox.
 
-> **For AI Assistants**: See [do-app-platform-skills](https://github.com/bikramkgupta/do-app-platform-skills) for comprehensive App Platform guidance including deployment, troubleshooting, and this sandbox SDK.
+> **For AI Assistants**: See [do-app-platform-skills](https://github.com/digitalocean-labs/do-app-platform-skills/) for comprehensive App Platform guidance including deployment, troubleshooting, and this sandbox SDK.
 
 ## Features
 
