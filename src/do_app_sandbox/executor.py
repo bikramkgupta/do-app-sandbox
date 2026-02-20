@@ -16,6 +16,7 @@ from .types import CommandResult
 
 # Marker used to extract exit code from command output
 EXIT_CODE_MARKER = "___EXIT_CODE___"
+_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # Prompt patterns for different container configurations
 # The sandbox containers use a 'sandbox' user
@@ -36,13 +37,18 @@ class Executor:
             app_id: The App Platform application ID
             component: The component/service name within the app
         """
+        if not app_id or not _IDENTIFIER_PATTERN.fullmatch(app_id):
+            raise ValueError("app_id must contain only letters, numbers, hyphens, and underscores")
+        if not component or not _IDENTIFIER_PATTERN.fullmatch(component):
+            raise ValueError("component must contain only letters, numbers, hyphens, and underscores")
+
         self.app_id = app_id
         self.component = component
         self._child: pexpect.spawn | None = None
 
-    def _get_doctl_command(self) -> str:
-        """Build the doctl console command."""
-        return f"doctl apps console {self.app_id} {self.component}"
+    def _get_doctl_args(self) -> list[str]:
+        """Build argv for doctl console command."""
+        return ["apps", "console", self.app_id, self.component]
 
     def _connect(self, timeout: int = 30, max_retries: int = 2) -> pexpect.spawn:
         """Establish a connection to the container console.
@@ -57,13 +63,13 @@ class Executor:
         Raises:
             ConnectionError: If connection fails after all retries
         """
-        doctl_cmd = self._get_doctl_command()
+        doctl_args = self._get_doctl_args()
         last_error = None
 
         for attempt in range(max_retries):
             child = None
             try:
-                child = pexpect.spawn(doctl_cmd, timeout=timeout)
+                child = pexpect.spawn("doctl", doctl_args, timeout=timeout)
                 child.setecho(False)
                 child.delayafterread = 0.05
                 child.delayafterwrite = 0.05
@@ -178,6 +184,11 @@ class Executor:
 
         # Build the main command with environment variables
         if env:
+            invalid_keys = [key for key in env if not _IDENTIFIER_PATTERN.fullmatch(key)]
+            if invalid_keys:
+                invalid = ", ".join(sorted(invalid_keys))
+                raise ValueError(f"Invalid environment variable name(s): {invalid}")
+
             exports = "; ".join(f"export {k}={shlex.quote(v)}" for k, v in env.items())
             parts.append(f"{exports}; {command}")
         else:

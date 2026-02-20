@@ -7,6 +7,16 @@ on:
       - "images/**"
       - ".github/workflows/build-images.yml"
   workflow_dispatch:
+    inputs:
+      publish_python_service_latest:
+        description: "Publish only sandbox-python-service:latest"
+        required: true
+        default: false
+        type: boolean
+      confirm_target:
+        description: "Type exactly: digitalocean-labs/sandbox-python-service:latest"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,6 +28,7 @@ env:
 
 jobs:
   build-python:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -53,6 +64,7 @@ jobs:
           provenance: false
 
   build-node:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -89,6 +101,7 @@ jobs:
 
   # Service mode images (with FastAPI sandbox API)
   build-python-service:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -117,6 +130,7 @@ jobs:
           provenance: false
 
   build-python-worker:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -141,6 +155,7 @@ jobs:
           provenance: false
 
   build-node-service:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -169,6 +184,7 @@ jobs:
           provenance: false
 
   build-node-worker:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -194,6 +210,7 @@ jobs:
 
   # Tailscale-enabled images (SSH access via Tailscale)
   build-tailscale-python:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -218,6 +235,7 @@ jobs:
           provenance: false
 
   build-tailscale-node:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -240,3 +258,83 @@ jobs:
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.OWNER }}/sandbox-tailscale-node:latest
           provenance: false
+
+  publish-python-service-manual:
+    name: Manual publish sandbox-python-service:latest
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.publish_python_service_latest == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate target confirmation
+        run: |
+          expected="digitalocean-labs/sandbox-python-service:latest"
+          if [ "${{ inputs.confirm_target }}" != "$expected" ]; then
+            echo "Expected confirm_target='$expected'"
+            exit 1
+          fi
+
+      - name: Enforce org owner
+        run: |
+          if [ "${{ github.repository_owner }}" != "digitalocean-labs" ]; then
+            echo "This manual publish job only runs for repositories owned by digitalocean-labs"
+            exit 1
+          fi
+
+      - name: Validate required files
+        run: |
+          test -f images/sandbox-python-service/Dockerfile
+          test -d images/sandbox_api
+
+      - name: Prepare build context
+        run: cp -r images/sandbox_api images/sandbox-python-service/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Build image (strict)
+        uses: docker/build-push-action@v5
+        with:
+          context: images/sandbox-python-service
+          push: false
+          tags: ${{ env.REGISTRY }}/digitalocean-labs/sandbox-python-service:latest
+          no-cache: true
+          provenance: false
+          load: true
+
+      - name: Smoke test /health
+        run: |
+          docker run -d --name sandbox-python-service-smoke -p 18080:8080 \
+            -e SANDBOX_API_TOKEN=smoke-token \
+            ${{ env.REGISTRY }}/digitalocean-labs/sandbox-python-service:latest
+          trap 'docker logs sandbox-python-service-smoke || true; docker rm -f sandbox-python-service-smoke || true' EXIT
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/health >/tmp/health.json; then
+              break
+            fi
+            sleep 2
+          done
+
+          grep -q '"status":"healthy"' /tmp/health.json
+
+      - name: Push image
+        uses: docker/build-push-action@v5
+        with:
+          context: images/sandbox-python-service
+          push: true
+          tags: ${{ env.REGISTRY }}/digitalocean-labs/sandbox-python-service:latest
+          provenance: false
+
+      - name: Verify pushed tag
+        run: docker manifest inspect ${{ env.REGISTRY }}/digitalocean-labs/sandbox-python-service:latest >/dev/null
