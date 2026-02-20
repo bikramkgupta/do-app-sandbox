@@ -24,6 +24,12 @@ A Python SDK that provides sandbox-like capabilities for DigitalOcean App Platfo
 - **Tailscale SSH** (browser-based SSH access): [`docs/tailscale_ssh.md`](docs/tailscale_ssh.md)
 - Reference tables for SDK and CLI parameters/outputs: [`docs/sandbox_reference.md`](docs/sandbox_reference.md)
 - Troubleshooting existing App Platform apps: [`docs/troubleshooting_existing_apps.md`](docs/troubleshooting_existing_apps.md)
+- Release process checklist: [`docs/release_checklist.md`](docs/release_checklist.md)
+
+## Project Governance
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Community standards: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 
 ## Getting Started
 

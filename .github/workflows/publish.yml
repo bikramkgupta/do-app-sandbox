@@ -13,6 +13,15 @@ on:
         required: false
         type: string
 
+permissions:
+  attestations: write
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-pypi
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: Build and Publish to PyPI
@@ -38,6 +47,23 @@ jobs:
       - name: Check package
         run: twine check dist/*
 
+      - name: Install SBOM tooling
+        run: pip install cyclonedx-bom
+
+      - name: Generate SBOM
+        run: cyclonedx-py environment --output-format json --output-file sbom.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__
@@ -49,5 +75,7 @@ jobs:
           echo "## Published to PyPI! 🎉" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Package:** do-app-sandbox" >> $GITHUB_STEP_SUMMARY
+          echo "**SBOM:** sbom.json (artifact)" >> $GITHUB_STEP_SUMMARY
+          echo "**Provenance:** generated via GitHub attestations" >> $GITHUB_STEP_SUMMARY
           echo "**Files:**" >> $GITHUB_STEP_SUMMARY
           ls -la dist/ >> $GITHUB_STEP_SUMMARY
