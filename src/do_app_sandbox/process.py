@@ -9,7 +9,7 @@ import time
 import uuid
 
 from .exceptions import CommandExecutionError
-from .executor import Executor
+from .executor import Executor, _validate_env_keys
 from .types import ProcessInfo
 
 
@@ -54,6 +54,7 @@ class ProcessManager:
         # Build the command with optional env vars
         cmd_parts = []
         if env:
+            _validate_env_keys(env)
             env_str = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
             cmd_parts.append(env_str)
         cmd_parts.append(command)

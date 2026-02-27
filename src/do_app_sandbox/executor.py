@@ -17,6 +17,28 @@ from .types import CommandResult
 # Marker used to extract exit code from command output
 EXIT_CODE_MARKER = "___EXIT_CODE___"
 
+# Pattern for valid POSIX environment variable names
+_ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_env_keys(env: dict[str, str]) -> None:
+    """Validate that all environment variable keys are safe POSIX names.
+
+    Prevents shell injection via malicious key names like 'FOO;rm -rf /'.
+
+    Args:
+        env: Dictionary of environment variables to validate
+
+    Raises:
+        ValueError: If any key contains invalid characters
+    """
+    for key in env:
+        if not _ENV_KEY_PATTERN.match(key):
+            raise ValueError(
+                f"Invalid environment variable name: {key!r}. "
+                "Must match [A-Za-z_][A-Za-z0-9_]*"
+            )
+
 # Prompt patterns for different container configurations
 # The sandbox containers use a 'sandbox' user
 PROMPT_PATTERNS = [
@@ -178,6 +200,7 @@ class Executor:
 
         # Build the main command with environment variables
         if env:
+            _validate_env_keys(env)
             exports = "; ".join(f"export {k}={shlex.quote(v)}" for k, v in env.items())
             parts.append(f"{exports}; {command}")
         else:
