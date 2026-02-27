@@ -10,6 +10,7 @@ Supports two deployment modes:
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -847,12 +848,13 @@ class Sandbox:
         clone_url = url
         env = None
 
+        key_path = None
         if credentials:
             if credentials.ssh_key:
-                # Write SSH key temporarily
-                key_path = "/tmp/git_key"
+                # Write SSH key to randomized path
+                key_path = f"/tmp/git_key_{uuid.uuid4().hex[:12]}"
                 self.filesystem.write_file(key_path, credentials.ssh_key)
-                self.exec(f"chmod 600 {key_path}")
+                self.exec(f"chmod 600 {shlex.quote(key_path)}")
                 env = {"GIT_SSH_COMMAND": f"ssh -i {key_path} -o StrictHostKeyChecking=no"}
             elif credentials.token:
                 # Embed token in HTTPS URL
@@ -861,11 +863,11 @@ class Sandbox:
                 clone_url = urlunparse(parsed._replace(netloc=f"{auth}@{parsed.netloc}"))
 
         cmd_parts.extend([clone_url, path])
-        result = self.exec(" ".join(cmd_parts), env=env)
+        result = self.exec(" ".join(shlex.quote(p) for p in cmd_parts), env=env)
 
         # Cleanup SSH key if used
-        if credentials and credentials.ssh_key:
-            self.exec("rm -f /tmp/git_key")
+        if key_path:
+            self.exec(f"rm -f {shlex.quote(key_path)}")
 
         return result
 
