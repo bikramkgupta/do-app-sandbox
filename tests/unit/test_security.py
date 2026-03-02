@@ -1,17 +1,10 @@
 """Unit tests for security fixes (SEC-001 through SEC-008)."""
 
 import shlex
-import sys
-from pathlib import Path
 
 import pytest
 
-# Add src to path for imports
-src_path = Path(__file__).parent.parent.parent / "src"
-sys.path.insert(0, str(src_path))
-
 from do_app_sandbox.executor import _validate_env_keys
-
 
 # =============================================================================
 # SEC-001 / SEC-008: Environment variable key validation
