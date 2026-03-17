@@ -9,7 +9,9 @@ Provides HTTP/SSE endpoints for:
 """
 
 import asyncio
+import hmac
 import json
+import logging
 import os
 import time
 import uuid
@@ -17,6 +19,8 @@ import uuid
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 try:
     import httpx
@@ -31,8 +35,39 @@ app = FastAPI(title="Sandbox API", description="HTTP API for sandbox command exe
 SANDBOX_TOKEN = os.environ.get("SANDBOX_API_TOKEN", "")
 SANDBOX_MODE = os.environ.get("SANDBOX_MODE", "service")
 
+if not SANDBOX_TOKEN:
+    logger.warning("SANDBOX_API_TOKEN not set. All authenticated endpoints will reject requests.")
+
 # Process tracking for background commands
 _processes: dict[int, dict] = {}
+
+# Environment variables that must not leak to subprocesses
+_SENSITIVE_ENV_VARS = {"SANDBOX_API_TOKEN"}
+
+# Allowed filesystem roots for file operations
+_ALLOWED_ROOTS = ["/workspace", "/home/sandbox", "/tmp"]
+
+
+def _get_safe_env(user_env: dict[str, str] | None = None) -> dict[str, str]:
+    """Build subprocess environment, stripping sensitive variables."""
+    env = {k: v for k, v in os.environ.items() if k not in _SENSITIVE_ENV_VARS}
+    if user_env:
+        env.update(user_env)
+    return env
+
+
+def _validate_path(path: str) -> str:
+    """Validate that a path is within allowed filesystem roots.
+
+    Returns the resolved real path.
+
+    Raises:
+        HTTPException: If path is outside allowed roots.
+    """
+    resolved = os.path.realpath(path)
+    if not any(resolved == root or resolved.startswith(root + "/") for root in _ALLOWED_ROOTS):
+        raise HTTPException(403, f"Access denied: path must be within {_ALLOWED_ROOTS}")
+    return resolved
 
 
 # =============================================================================
@@ -43,13 +78,13 @@ _processes: dict[int, dict] = {}
 async def verify_token(authorization: str = Header(None)):
     """Verify bearer token for protected endpoints."""
     if not SANDBOX_TOKEN:
-        return  # No token configured = allow all (development mode)
+        raise HTTPException(503, "Server not configured: SANDBOX_API_TOKEN is not set")
 
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing or invalid authorization header")
 
     token = authorization[7:]
-    if token != SANDBOX_TOKEN:
+    if not hmac.compare_digest(token, SANDBOX_TOKEN):
         raise HTTPException(403, "Invalid token")
 
 
@@ -89,9 +124,7 @@ class ExecResult(BaseModel):
 @app.post("/api/exec", response_model=ExecResult)
 async def exec_command(req: ExecRequest, _=Depends(verify_token)):
     """Execute a command and return the result."""
-    env = os.environ.copy()
-    if req.env:
-        env.update(req.env)
+    env = _get_safe_env(req.env)
 
     proc = await asyncio.create_subprocess_shell(
         req.command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=req.cwd, env=env
@@ -114,9 +147,7 @@ async def exec_stream(req: ExecRequest, _=Depends(verify_token)):
     """Execute a command with SSE streaming output."""
 
     async def generate():
-        env = os.environ.copy()
-        if req.env:
-            env.update(req.env)
+        env = _get_safe_env(req.env)
 
         proc = await asyncio.create_subprocess_shell(
             req.command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=req.cwd, env=env
@@ -194,9 +225,7 @@ async def exec_background(req: BackgroundExecRequest, _=Depends(verify_token)):
     """Start a background process."""
     log_file = f"/tmp/proc_{uuid.uuid4().hex[:8]}.log"
 
-    env = os.environ.copy()
-    if req.env:
-        env.update(req.env)
+    env = _get_safe_env(req.env)
 
     # Start process with nohup, redirect output to log file
     # Use subprocess.run for this quick operation to avoid async complexity
@@ -338,7 +367,10 @@ class KillRequest(BaseModel):
 
 @app.post("/api/processes/{pid}/kill")
 async def kill_process(pid: int, req: KillRequest = None, _=Depends(verify_token)):
-    """Kill a background process."""
+    """Kill a tracked background process."""
+    if pid not in _processes:
+        raise HTTPException(404, f"Process {pid} not tracked. Only processes started via /api/exec/background can be killed.")
+
     signal = req.signal if req else 15
     try:
         os.kill(pid, signal)
@@ -485,6 +517,8 @@ class FileListResponse(BaseModel):
 @app.get("/api/files")
 async def list_files(path: str = "/workspace", _=Depends(verify_token)):
     """List files in a directory."""
+    path = _validate_path(path)
+
     if not os.path.exists(path):
         raise HTTPException(404, f"Path not found: {path}")
 
@@ -511,6 +545,8 @@ async def list_files(path: str = "/workspace", _=Depends(verify_token)):
 @app.get("/api/files/content")
 async def read_file(path: str, _=Depends(verify_token)):
     """Read file content."""
+    path = _validate_path(path)
+
     if not os.path.exists(path):
         raise HTTPException(404, f"File not found: {path}")
 
@@ -539,6 +575,8 @@ class WriteFileRequest(BaseModel):
 @app.post("/api/files/content")
 async def write_file(req: WriteFileRequest, _=Depends(verify_token)):
     """Write content to a file."""
+    _validate_path(req.path)
+
     # Ensure parent directory exists
     parent = os.path.dirname(req.path)
     if parent and not os.path.exists(parent):
@@ -560,6 +598,8 @@ async def write_file(req: WriteFileRequest, _=Depends(verify_token)):
 @app.get("/api/files/download")
 async def download_file(path: str, _=Depends(verify_token)):
     """Download a file."""
+    path = _validate_path(path)
+
     if not os.path.exists(path):
         raise HTTPException(404, f"File not found: {path}")
 

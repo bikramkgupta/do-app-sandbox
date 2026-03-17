@@ -49,8 +49,15 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH=/opt
 
+# Create non-root user
+RUN useradd -m -s /bin/bash sandbox && \
+    chown -R sandbox:sandbox /workspace /opt/sandbox_api
+
 # Expose HTTP port for App Platform ingress
 EXPOSE 8080
+
+# Run as non-root user
+USER sandbox
 
 # Run the FastAPI server
 CMD ["uvicorn", "sandbox_api.main:app", "--host", "0.0.0.0", "--port", "8080"]
