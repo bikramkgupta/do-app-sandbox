@@ -27,7 +27,7 @@ jobs:
     # Always run on push/PR, only run on dispatch if unit selected
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'unit'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --dev
       - run: cd tests && make test-unit
@@ -43,7 +43,7 @@ jobs:
       SPACES_ACCESS_KEY: ${{ secrets.SPACES_ACCESS_KEY }}
       SPACES_SECRET_KEY: ${{ secrets.SPACES_SECRET_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --dev
       - name: Install doctl
