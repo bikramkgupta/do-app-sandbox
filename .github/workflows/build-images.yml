@@ -55,7 +55,7 @@ jobs:
           password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Build and push python image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/python
           file: images/python/${{ matrix.dockerfile }}
@@ -91,7 +91,7 @@ jobs:
           password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Build and push node image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/node
           file: images/node/${{ matrix.dockerfile }}
@@ -122,7 +122,7 @@ jobs:
           cp -r images/sandbox_api images/sandbox-python-service/
 
       - name: Build and push python-service image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/sandbox-python-service
           push: true
@@ -147,7 +147,7 @@ jobs:
           password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Build and push python-worker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/sandbox-python-worker
           push: true
@@ -176,7 +176,7 @@ jobs:
           cp -r images/sandbox_api images/sandbox-node-service/
 
       - name: Build and push node-service image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/sandbox-node-service
           push: true
@@ -201,7 +201,7 @@ jobs:
           password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Build and push node-worker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/sandbox-node-worker
           push: true
@@ -227,7 +227,7 @@ jobs:
           password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Build and push tailscale-python image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/tailscale-python
           push: true
@@ -252,7 +252,7 @@ jobs:
           password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Build and push tailscale-node image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/tailscale-node
           push: true
@@ -303,7 +303,7 @@ jobs:
           password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Build image (strict)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/sandbox-python-service
           push: false
@@ -329,7 +329,7 @@ jobs:
           grep -q '"status":"healthy"' /tmp/health.json
 
       - name: Push image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: images/sandbox-python-service
           push: true
