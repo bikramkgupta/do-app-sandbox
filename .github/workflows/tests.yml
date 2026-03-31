@@ -28,7 +28,7 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'unit'
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync --dev
       - run: cd tests && make test-unit
 
@@ -44,7 +44,7 @@ jobs:
       SPACES_SECRET_KEY: ${{ secrets.SPACES_SECRET_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync --dev
       - name: Install doctl
         uses: digitalocean/action-doctl@v2
