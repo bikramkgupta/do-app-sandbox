@@ -1,0 +1,25 @@
+[extend]
+# Extend the default gitleaks config
+# https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+
+[allowlist]
+description = "Global allowlist for known false positives"
+
+paths = [
+    '''.env\.example$''',
+    '''\.md$''',
+]
+
+regexTarget = "line"
+regexes = [
+    # Placeholder/example tokens (not real credentials)
+    '''dop_v1_your_token_here''',
+    '''ghp_your_personal_access_token''',
+    '''ghp_your_token_here''',
+    '''ghp_xxx''',
+    '''your_access_key''',
+    '''your_secret_key''',
+    '''your-service-token''',
+    # Dummy RSA key used in tests (body is just "...")
+    '''BEGIN RSA PRIVATE KEY-----\\n\.\.\.\\n-----END''',
+]
