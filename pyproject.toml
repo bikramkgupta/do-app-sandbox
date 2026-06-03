@@ -39,7 +39,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=1.3.0",
     "httpx>=0.27.0",
-    "boto3>=1.34.0",
+    "boto3>=1.43.22",
     "ruff>=0.8.0",
     "mypy>=1.14.0",
     "pip-audit>=2.7.0",
@@ -47,10 +47,10 @@ dev = [
     "python-dotenv>=1.0.0",
 ]
 spaces = [
-    "boto3>=1.34.0",
+    "boto3>=1.43.22",
 ]
 all = [
-    "boto3>=1.34.0",
+    "boto3>=1.43.22",
 ]
 
 [build-system]
@@ -81,7 +81,7 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "httpx>=0.27.0",
-    "boto3>=1.34.0",
+    "boto3>=1.43.22",
     "ruff>=0.8.0",
     "mypy>=1.14.0",
     "pip-audit>=2.7.0",
